@@ -1,0 +1,1135 @@
+#!/usr/bin/ksh
+############################################################################################################################
+##
+## Script Name :  load_CLM_SNF_NPI_QTR_AGG.btq
+## Author      :  Dirk Lieske
+## Create Date :  2017-09-07
+##
+## Description :  THIS PROGRAM Aggregates Beneficary SNF repords to a single NPI Quarter level
+##
+## Logic Notes:
+##(EOT = END OF TIME)
+##(B-DT Begin Date E-DT End Date)
+##(NB-DT Next Begin Date)
+##(PE-DT Previous End Date)
+##|     |      NB-DT |PE-DT |New B-DT |New E-DT
+##|B-DT |E-DT |1     |      |         |
+##|1    |2    |1     |      |1        |2
+##|1    |3    |1     |2     |3        |3
+##|1    |4    |1     |3     |4        |4
+##|1    |EOT  |4     |4     |5        |3
+##|4    |EOT  |5     |EOT   |4        |4
+##|5    |EOT  |6     |EOT   |5        |5
+##|6    |EOT  |8     |EOT   |6        |7
+##|8    |EOT  |      |EOT   |8        |EOT
+##|                  |EOT   |
+##
+##New B-DT = IF PE-DT != EOT AND NOT NULL THEN PE-DT + 1 ELSE B-DT
+##New E-DT = IF (PE-DT = EOT OR E-DT = EOT) AND NB-DT NOT NULL THEN NB-DT -1 ELSE E-DT
+##
+##IF NEW B-DT > NEW E-DT DELETE
+############################################################################################################################
+LOGON_PATH=/app/IDR/OPI/CMS/scripts/logon
+LOGON=".logon `cat ${LOGON_PATH}/btq.logon`"
+
+. /app/IDR/COMMON/CMS/scripts/set_env_infa.ksh
+if [ "$(echo ${IDR_ENVNAME} | /usr/bin/tr '[a-z]' '[A-Z]')" = "DEV" ]; then
+        DBENV="C$(echo ${IDR_ENVNAME} | /usr/bin/tr '[a-z]' '[A-Z]')"
+else
+        DBENV="$(echo ${IDR_ENVNAME} | /usr/bin/tr '[a-z]' '[A-Z]')"
+fi
+
+
+
+bteq <<!
+${LOGON}
+.SET WIDTH 132;
+.SET MAXERROR 1;
+
+
+--------------------------------------------------------------------------------------
+--- A TEMP TABLE TMP_PRVDR_CNTRCTR_PIN_NPI IS USED TO INITIALLY PROCESS DATA INTO ----
+--- CHECK IF THIS TABLE CURRENTLY EXISTS, IF IT DOES DROP IS SO IT CAN BE RECREATED---
+--------------------------------------------------------------------------------------
+SELECT
+    'X'
+FROM
+    DBC.TABLES tables
+WHERE
+    tables.DatabaseName = 'CMS_STAGE_OPI_${DBENV}'
+AND tables.TableName    = 'TMP_PRVDR_CNTRCTR_PIN_NPI'
+;
+.IF ACTIVITYCOUNT=0 THEN .GOTO SKIPDROP
+
+DROP TABLE CMS_STAGE_OPI_${DBENV}.TMP_PRVDR_CNTRCTR_PIN_NPI
+;
+.LABEL SKIPDROP
+
+
+
+
+CREATE SET TABLE CMS_STAGE_OPI_${DBENV}.TMP_PRVDR_CNTRCTR_PIN_NPI
+,   NO FALLBACK
+,   NO BEFORE JOURNAL
+,   NO AFTER JOURNAL
+,   CHECKSUM = DEFAULT
+,   DEFAULT MERGEBLOCKRATIO
+(
+     CLM_CNTRCTR_NUM               CHAR(5) NOT NULL DEFAULT '~    '
+,    PRVDR_PIN_NUM                 CHAR(14)NOT NULL DEFAULT '~             '
+,    PRVDR_PBX_EFCTV_DT            DATE FORMAT 'yyyy-mm-dd' NOT NULL DEFAULT DATE '1000-01-01'
+,    PRVDR_PBX_OBSLT_DT            DATE FORMAT 'yyyy-mm-dd' DEFAULT DATE '9999-12-31'
+,    PRVDR_CNTRCTR_USPS_STATE_CD   CHAR(2) DEFAULT '~ '
+,    PRVDR_CNTRCTR_TYPE_CD         CHAR(1) DEFAULT '~' COMPRESS ('B','~')
+,    PRVDR_LGCY_ADR_TYPE_CD        CHAR(1) DEFAULT '~' COMPRESS ('B','~')
+,    PRVDR_SBCNTRCTR_IND           CHAR(1) DEFAULT '~' COMPRESS ('0','1','2','3','~')
+,    PRVDR_CLIA_NUM                CHAR(12)
+,    PRVDR_PBX_CRDNTL_CD           CHAR(5) DEFAULT '~    ' COMPRESS '~    '
+,    PRVDR_DEATH_DT                DATE FORMAT 'yyyy-mm-dd'
+,    PRVDR_GRDTN_YR_NUM            CHAR(4)
+,    PRVDR_GRP_NUM                 CHAR(10)
+,    PRVDR_GRP_PREX_NAME           CHAR(5)
+,    PRVDR_HBP_IND                 CHAR(1) COMPRESS ('1','2','N','Y','~')
+,    PRVDR_LAST_UPDT_DT            DATE FORMAT 'yyyy-mm-dd' DEFAULT DATE '1000-01-01'
+,    PRVDR_LCNS_USPS_STATE_CD      CHAR(2)
+,    PRVDR_PBX_MDCL_SCHL_CD        CHAR(5) DEFAULT '~    ' COMPRESS '~    '
+,    PRVDR_PBX_STUS_CD             CHAR(2)
+,    PRVDR_MDCR_ENRLMT_BGN_DT      DATE FORMAT 'yyyy-mm-dd' DEFAULT DATE '1000-01-01'
+,    PRVDR_MDCR_ENRLMT_END_DT      DATE FORMAT 'yyyy-mm-dd' DEFAULT DATE '9999-12-31'
+,    NXT_PRVDR_MDCR_ENRLMT_BGN_DT  DATE FORMAT 'yyyy-mm-dd' DEFAULT DATE '1000-01-01'
+,    PRV_PRVDR_MDCR_ENRLMT_END_DT  DATE FORMAT 'yyyy-mm-dd' DEFAULT DATE '9999-12-31'
+,    PRVDR_MDCR_PRTCPTN_IND        CHAR(1) COMPRESS (' ','N','U','Y','~')
+,    PRVDR_NPI_NUM                 CHAR(10) DEFAULT '~         ' COMPRESS '~         '
+,    PRVDR_NPI_SRC_ID              CHAR(1)
+,    PRVDR_ADR_1ST_NAME          VARCHAR(25)
+,    PRVDR_ADR_CITY_NAME         VARCHAR(28)
+,    PRVDR_ADR_GEO_SK            INTEGER DEFAULT 0
+,    PRVDR_ADR_GEO_ZIP4_CD       CHAR(4)
+,    PRVDR_ADR_GEO_ZIP5_CD       CHAR(5)
+,    PRVDR_ADR_LAST_NAME         VARCHAR(35)
+,    PRVDR_ADR_LINE_1_ADR        VARCHAR(100)
+,    PRVDR_ADR_LINE_2_ADR        VARCHAR(100)
+,    PRVDR_ADR_MDL_INITL_NAME    CHAR(1)
+,    PRVDR_ADR_ORG_NAME          VARCHAR(70)
+,    PRVDR_ADR_TEL_NUM           CHAR(10)
+,    PRVDR_ADR_USPS_CNTY_CD      CHAR(3) DEFAULT '~  '
+,    PRVDR_ADR_USPS_STATE_CD     CHAR(2) DEFAULT '~ '
+,    PRVDR_SPCLTY_CD               CHAR(2) DEFAULT '~ ' COMPRESS '~ '
+,    PRVDR_STATE_LCNSD_NUM         CHAR(12)
+,    PRVDR_PBX_STRUC_CD            CHAR(2) DEFAULT '~ ' COMPRESS ('GN','GU','IP','MN','MU','TB','~ ')
+,    PRVDR_SUB_SPCLTY_CD           CHAR(2)
+,    PRVDR_TIN_NUM                 CHAR(9)
+,    PRVDR_TYPE_IND                CHAR(1) COMPRESS ('0','1')
+,    PRVDR_UPIN_NUM                CHAR(6)
+,    PRVDR_GRP_CNTRCTR_TYPE_CD     CHAR(1) COMPRESS 'B'
+,    PRVDR_GRP_SBCNTRCTR_SQNC      CHAR(1) COMPRESS ('0','1','2','3')
+,    PRVDR_ID_PREX_NUM             CHAR(5)
+,    PRVDR_GRP_CNTRCTR_STATE_CD    CHAR(2)
+,    META_SK                       INTEGER
+,    META_SRC_SK                   SMALLINT
+)
+PRIMARY INDEX NP_PRVDR_PTB ( PRVDR_PIN_NUM )
+;
+
+
+INSERT INTO CMS_STAGE_OPI_${DBENV}.TMP_PRVDR_CNTRCTR_PIN_NPI
+(
+    PRVDR_PIN_NUM                 
+,   CLM_CNTRCTR_NUM               
+,   PRVDR_NPI_NUM                 
+,   PRVDR_LGCY_ADR_TYPE_CD        
+,   PRVDR_MDCR_ENRLMT_BGN_DT      
+,   PRVDR_MDCR_ENRLMT_END_DT      
+,   PRVDR_PBX_EFCTV_DT            
+,   PRVDR_PBX_OBSLT_DT            
+,   PRV_PRVDR_MDCR_ENRLMT_END_DT  
+,   NXT_PRVDR_MDCR_ENRLMT_BGN_DT  
+,   PRVDR_CNTRCTR_USPS_STATE_CD   
+,   PRVDR_CNTRCTR_TYPE_CD         
+,   PRVDR_SBCNTRCTR_IND           
+,   PRVDR_CLIA_NUM                
+,   PRVDR_PBX_CRDNTL_CD           
+,   PRVDR_DEATH_DT                
+,   PRVDR_GRP_NUM                 
+,   PRVDR_GRP_PREX_NAME           
+,   PRVDR_LCNS_USPS_STATE_CD      
+,   PRVDR_MDCR_PRTCPTN_IND        
+,   PRVDR_NPI_SRC_ID              
+,   PRVDR_ADR_1ST_NAME          
+,   PRVDR_ADR_CITY_NAME         
+,   PRVDR_ADR_GEO_SK            
+,   PRVDR_ADR_GEO_ZIP4_CD       
+,   PRVDR_ADR_GEO_ZIP5_CD       
+,   PRVDR_ADR_LAST_NAME         
+,   PRVDR_ADR_LINE_1_ADR        
+,   PRVDR_ADR_LINE_2_ADR        
+,   PRVDR_ADR_MDL_INITL_NAME    
+,   PRVDR_ADR_ORG_NAME          
+,   PRVDR_ADR_TEL_NUM           
+,   PRVDR_ADR_USPS_CNTY_CD      
+,   PRVDR_ADR_USPS_STATE_CD     
+,   PRVDR_SPCLTY_CD               
+,   PRVDR_STATE_LCNSD_NUM         
+,   PRVDR_SUB_SPCLTY_CD           
+,   PRVDR_TIN_NUM         
+,   PRVDR_TYPE_IND                
+,   PRVDR_UPIN_NUM                
+,   PRVDR_GRP_CNTRCTR_TYPE_CD     
+,   PRVDR_GRP_SBCNTRCTR_SQNC      
+,   PRVDR_ID_PREX_NUM             
+,   PRVDR_GRP_CNTRCTR_STATE_CD
+,   META_SK
+)
+SELECT
+    b.PRVDR_PIN_NUM
+,   b.CLM_CNTRCTR_NUM
+,   b.PRVDR_NPI_NUM
+,   b.PRVDR_LGCY_ADR_TYPE_CD
+,   b.PRVDR_MDCR_ENRLMT_BGN_DT 
+,   b.PRVDR_MDCR_ENRLMT_END_DT
+,   CASE WHEN     PRV_PRVDR_MDCR_ENRLMT_END_DT <> '9999-12-31' (DATE)
+              AND PRV_PRVDR_MDCR_ENRLMT_END_DT IS NOT NULL
+         THEN PRV_PRVDR_MDCR_ENRLMT_END_DT + 1
+         ELSE b.PRVDR_MDCR_ENRLMT_BGN_DT
+    END AS PRVDR_PBX_EFCTV_DT
+,   CASE WHEN     (   PRV_PRVDR_MDCR_ENRLMT_END_DT = '9999-12-31' (DATE)
+                           OR b.PRVDR_MDCR_ENRLMT_END_DT = '9999-12-31' (DATE))
+              AND  NXT_PRVDR_MDCR_ENRLMT_BGN_DT IS NOT NULL
+         THEN NXT_PRVDR_MDCR_ENRLMT_BGN_DT - 1
+                ELSE b.PRVDR_MDCR_ENRLMT_END_DT
+    END AS PRVDR_PBX_OBSLT_DT
+--  GET HIGHEST ENROLLMENT END DATE BEFORE CURRENT RECORD
+,   MAX(b.PRVDR_MDCR_ENRLMT_END_DT) OVER (PARTITION BY 
+                                              b.PRVDR_PIN_NUM
+                                          ,   b.CLM_CNTRCTR_NUM
+                                          ,   b.PRVDR_NPI_NUM
+                                          ,   b.PRVDR_LGCY_ADR_TYPE_CD
+                                          ORDER BY 
+                                              b.PRVDR_PIN_NUM
+                                          ,   b.CLM_CNTRCTR_NUM
+                                          ,   b.PRVDR_NPI_NUM
+                                          ,   b.PRVDR_LGCY_ADR_TYPE_CD
+                                          ,   b.PRVDR_MDCR_ENRLMT_BGN_DT 
+                                          ,   b.PRVDR_MDCR_ENRLMT_END_DT ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                                         ) AS PRV_PRVDR_MDCR_ENRLMT_END_DT
+--  GETaLOWEST ENROLLMENT BEGIN DATE AFTER CURRENT RECORD
+,   MIN(b.PRVDR_MDCR_ENRLMT_BGN_DT) OVER (PARTITION BY 
+                                              b.PRVDR_PIN_NUM
+                                          ,   b.CLM_CNTRCTR_NUM
+                                          ,   b.PRVDR_NPI_NUM
+                                          ,   b.PRVDR_LGCY_ADR_TYPE_CD
+                                          ORDER BY 
+                                              b.PRVDR_PIN_NUM
+                                          ,   b.CLM_CNTRCTR_NUM
+                                          ,   b.PRVDR_NPI_NUM
+                                          ,   b.PRVDR_LGCY_ADR_TYPE_CD
+                                          ,   b.PRVDR_MDCR_ENRLMT_BGN_DT 
+                                          ,   b.PRVDR_MDCR_ENRLMT_END_DT ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING
+                                                                         ) AS NXT_PRVDR_MDCR_ENRLMT_BGN_DT
+,   b.PRVDR_CNTRCTR_USPS_STATE_CD
+,   b.PRVDR_CNTRCTR_TYPE_CD
+,   b.PRVDR_SBCNTRCTR_IND
+,   b.PRVDR_CLIA_NUM
+,   b.PRVDR_PBX_CRDNTL_CD
+,   b.PRVDR_DEATH_DT
+,   b.PRVDR_GRP_NUM
+,   b.PRVDR_GRP_PREX_NAME
+,   b.PRVDR_LCNS_USPS_STATE_CD
+,   b.PRVDR_MDCR_PRTCPTN_IND
+,   b.PRVDR_NPI_SRC_ID
+,   b.PRVDR_ADR_1ST_NAME
+,   b.PRVDR_ADR_CITY_NAME
+,   b.PRVDR_ADR_GEO_SK
+,   b.PRVDR_ADR_GEO_ZIP4_CD
+,   b.PRVDR_ADR_GEO_ZIP5_CD
+,   b.PRVDR_ADR_LAST_NAME
+,   b.PRVDR_ADR_LINE_1_ADR
+,   b.PRVDR_ADR_LINE_2_ADR
+,   b.PRVDR_ADR_MDL_INITL_NAME
+,   b.PRVDR_ADR_ORG_NAME
+,   b.PRVDR_ADR_TEL_NUM
+,   b.PRVDR_ADR_USPS_CNTY_CD
+,   b.PRVDR_ADR_USPS_STATE_CD
+,   b.PRVDR_SPCLTY_CD
+,   b.PRVDR_STATE_LCNSD_NUM
+,   b.PRVDR_SUB_SPCLTY_CD
+,   b.PRVDR_NPI_PIN_TIN_NUM
+,   b.PRVDR_TYPE_IND
+,   b.PRVDR_UPIN_NUM
+,   b.PRVDR_GRP_CNTRCTR_TYPE_CD
+,   b.PRVDR_GRP_SBCNTRCTR_SQNC
+,   b.PRVDR_ID_PREX_NUM
+,   b.PRVDR_GRP_CNTRCTR_STATE_CD
+,   (DATE * 1000) + 1
+FROM (
+    SELECT
+        a.PRVDR_PIN_NUM
+    ,   a.CLM_CNTRCTR_NUM
+    ,   a.PRVDR_NPI_NUM
+    ,   a.PRVDR_MDCR_ENRLMT_BGN_DT 
+    ,   a.PRVDR_MDCR_ENRLMT_END_DT
+    ,   a.PRVDR_CNTRCTR_USPS_STATE_CD
+    ,   a.PRVDR_CNTRCTR_TYPE_CD
+    ,   a.PRVDR_SBCNTRCTR_IND
+    ,   a.PRVDR_CLIA_NUM
+    ,   a.PRVDR_PBX_CRDNTL_CD
+    ,   a.PRVDR_DEATH_DT
+    ,   a.PRVDR_GRP_NUM
+    ,   a.PRVDR_GRP_PREX_NAME
+    ,   a.PRVDR_LCNS_USPS_STATE_CD
+    ,   a.PRVDR_MDCR_PRTCPTN_IND
+    ,   a.PRVDR_NPI_SRC_ID
+    ,   a.PRVDR_ADR_1ST_NAME
+    ,   a.PRVDR_ADR_CITY_NAME
+    ,   a.PRVDR_ADR_GEO_SK
+    ,   a.PRVDR_ADR_GEO_ZIP4_CD
+    ,   a.PRVDR_ADR_GEO_ZIP5_CD
+    ,   a.PRVDR_ADR_LAST_NAME
+    ,   a.PRVDR_ADR_LINE_1_ADR
+    ,   a.PRVDR_ADR_LINE_2_ADR
+    ,   a.PRVDR_ADR_MDL_INITL_NAME
+    ,   a.PRVDR_ADR_ORG_NAME
+    ,   a.PRVDR_ADR_TEL_NUM
+    ,   a.PRVDR_ADR_USPS_CNTY_CD
+    ,   a.PRVDR_ADR_USPS_STATE_CD
+    ,   a.PRVDR_SPCLTY_CD
+    ,   a.PRVDR_STATE_LCNSD_NUM
+    ,   a.PRVDR_SUB_SPCLTY_CD
+    ,   a.PRVDR_NPI_PIN_TIN_NUM
+    ,   a.PRVDR_TYPE_IND
+    ,   a.PRVDR_UPIN_NUM
+    ,   a.PRVDR_GRP_CNTRCTR_TYPE_CD
+    ,   a.PRVDR_GRP_SBCNTRCTR_SQNC
+    ,   a.PRVDR_ID_PREX_NUM
+    ,   a.PRVDR_GRP_CNTRCTR_STATE_CD
+    ,   a.PRVDR_LGCY_ADR_TYPE_CD
+    FROM (
+        SELECT
+            TRIM(pg.PRVDR_PIN_GRP_NUM)                                    AS PRVDR_PIN_NUM               --CHAR(14)
+        ,   pg.PRVDR_NPI_PIN_BGN_DT                                       AS PRVDR_NPI_PIN_BGN_DT        
+        ,   pg.PRVDR_NPI_PIN_END_DT                                       AS PRVDR_NPI_PIN_END_DT
+        ,   pg.CLM_CNTRCTR_NUM                                            AS CLM_CNTRCTR_NUM             --CHAR(5)
+        ,   NULL (CHAR(2))                                                AS PRVDR_CNTRCTR_USPS_STATE_CD --CHAR(2)
+        ,   NULL (CHAR(1))                                                AS PRVDR_CNTRCTR_TYPE_CD       --CHAR(1)
+        ,   NULL (CHAR(1))                                                AS PRVDR_SBCNTRCTR_IND         --CHAR(1)
+        ,   pg.PRVDR_NPI_PIN_CLIA_NUM                                     AS PRVDR_CLIA_NUM              --CHAR(12)
+        ,   NULL (CHAR(5))                                                AS PRVDR_PBX_CRDNTL_CD         --CHAR(5)
+        ,   NULL (DATE)                                                   AS PRVDR_DEATH_DT              --DATE
+        --PRVDR_GRDTN_YR_NUM CHAR(4) (SUPER PES PROV-YEAR-GRADUATED)
+        ,   NULL (CHAR(10))                                               AS PRVDR_GRP_NUM               --CHAR(10)
+        ,   NULL (CHAR(5))                                                AS PRVDR_GRP_PREX_NAME         --CHAR(5)
+        --PRVDR_HBP_IND CHAR(1)
+        --PRVDR_LAST_UPDT_DT DATE
+        ,   pnm.PRVDR_LCNS_ST_CD                                          AS PRVDR_LCNS_USPS_STATE_CD    --CHAR(2)
+        --PRVDR_PBX_MDCL_SCHL_CD CHAR(5) (SUPER PES PROV-MED-SCHOOL-CODE)
+        --PRVDR_PBX_STUS_CD CHAR(2)
+        ,   pg.PRVDR_NPI_PIN_MDCR_BGN_DT                                  AS PRVDR_MDCR_ENRLMT_BGN_DT    --DATE
+        ,   pg.PRVDR_NPI_PIN_MDCR_END_DT                                  AS PRVDR_MDCR_ENRLMT_END_DT    --DATE
+        ,   'Y'                                                           AS PRVDR_MDCR_PRTCPTN_IND      --CHAR(1)
+        ,   ph.PRVDR_NPI_NUM                                              AS PRVDR_NPI_NUM               --CHAR(10)
+        ,   'P'                                                           AS PRVDR_NPI_SRC_ID            --CHAR(1)
+        ,   NULL                                        (VARCHAR(25))     AS PRVDR_ADR_1ST_NAME        --VARCHAR(25)
+        ,   TRIM(pg.PRVDR_NPI_PIN_INVLD_PLC_NAME)       (VARCHAR(28))     AS PRVDR_ADR_CITY_NAME       --VARCHAR(28)
+        ,   pg.GEO_SK                                   (INTEGER)         AS PRVDR_ADR_GEO_SK          --INTEGER
+        ,   pg.GEO_ZIP4_CD                              (CHAR(4))         AS PRVDR_ADR_GEO_ZIP4_CD     --CHAR(4)
+        ,   LPAD(CAST(pg.GEO_SK AS VARCHAR(5)), 5, '0') (CHAR(5))         AS PRVDR_ADR_GEO_ZIP5_CD     --CHAR(5)
+        ,   NULL                                        (VARCHAR(35))     AS PRVDR_ADR_LAST_NAME       --VARCHAR(35)
+        ,   TRIM(pg.PRVDR_NPI_PIN_LINE_1_ADR)           (VARCHAR(100))    AS PRVDR_ADR_LINE_1_ADR      --VARCHAR(100)
+        ,   TRIM(pg.PRVDR_NPI_PIN_LINE_2_ADR)           (VARCHAR(100))    AS PRVDR_ADR_LINE_2_ADR      --VARCHAR(100)
+        ,   NULL                                        (CHAR(1))         AS PRVDR_ADR_MDL_INITL_NAME  --CHAR(1)
+        ,   TRIM(pg.PRVDR_NPI_PIN_NAME)                 (VARCHAR(70))     AS PRVDR_ADR_ORG_NAME        --VARCHAR(70)
+        ,   ph.PRVDR_PRCTC_TEL_NUM                                        AS PRVDR_ADR_TEL_NUM         --CHAR(10)
+        ,   gz.GEO_FIPS_CNTY_CD                                           AS PRVDR_ADR_USPS_CNTY_CD    --CHAR(3)
+        ,   TRIM(pg.PRVDR_NPI_PIN_INVLD_STATE_CD)       (CHAR(2))         AS PRVDR_ADR_USPS_STATE_CD   --CHAR(2)
+        ,   pg.PRVDR_NPI_PIN_SPCLTY_CD                                    AS PRVDR_SPCLTY_CD             --CHAR(2)
+        ,   NULL (CHAR(12))                                               AS PRVDR_STATE_LCNSD_NUM       --CHAR(12)
+        --PRVDR_PBX_STRUC_CD CHAR(2) (SUPER PES PROV-STRUCTURE-CODE)
+        ,   CASE WHEN pnm.PRVDR_SPCLTY_PRMRY_SW = 'N'
+                     THEN pnm.PRVDR_SPCLTY_CD
+                     WHEN pnm.PRVDR_2_SPCLTY_PRMRY_SW = 'N'
+                     THEN pnm.PRVDR_2_SPCLTY_CD
+                     WHEN pnm.PRVDR_SPCLTY_PRMRY_SW <> 'Y'
+                     THEN pnm.PRVDR_SPCLTY_CD
+                     WHEN pnm.PRVDR_2_SPCLTY_PRMRY_SW <> 'Y'
+                     THEN pnm.PRVDR_2_SPCLTY_CD
+                     ELSE NULL
+            END                                                           AS PRVDR_SUB_SPCLTY_CD         --CHAR(2)
+        ,   pg.PRVDR_NPI_PIN_TIN_NUM                                      AS PRVDR_NPI_PIN_TIN_NUM       --CHAR(9)
+        ,   '1'                                                           AS PRVDR_TYPE_IND              --CHAR(1)
+        ,   pg.PRVDR_NPI_PIN_UPIN_NUM                                     AS PRVDR_UPIN_NUM              --CHAR(6)
+        ,   SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1)                AS PRVDR_GRP_CNTRCTR_TYPE_CD   --CHAR(1)
+        ,   CASE WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'CA'
+                          AND pg.CLM_CNTRCTR_NUM = '31140'
+                     THEN '0'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'CA'
+                          AND pg.CLM_CNTRCTR_NUM = '01102'
+                     THEN '1'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'CA'
+                          AND pg.CLM_CNTRCTR_NUM IN ('31146', '01192')
+                     THEN '2'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'MO'
+                          AND pg.CLM_CNTRCTR_NUM = '05302'
+                     THEN '0'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'MO'
+                          AND pg.CLM_CNTRCTR_NUM = '00523'
+                     THEN '1'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'MO'
+                          AND pg.CLM_CNTRCTR_NUM = '00740'
+                     THEN '2'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'NY'
+                          AND pg.CLM_CNTRCTR_NUM = '13202'
+                     THEN '0'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'NY'
+                          AND pg.CLM_CNTRCTR_NUM = '00803'
+                     THEN '1'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'NY'
+                          AND pg.CLM_CNTRCTR_NUM = '14330'
+                     THEN '2'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'NY'
+                          AND pg.CLM_CNTRCTR_NUM = '00801'
+                     THEN '3'
+                     ELSE '0'
+                 END (CHAR(1))                                            AS PRVDR_GRP_SBCNTRCTR_SQNC    --CHAR(1)
+        ,   NULL (CHAR(5))                                                AS PRVDR_ID_PREX_NUM           --CHAR(5)
+        ,   SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 1 FOR 2)                AS PRVDR_GRP_CNTRCTR_STATE_CD  --CHAR(2)
+        ,   pg.PRVDR_LGCY_ADR_TYPE_CD                                     AS PRVDR_LGCY_ADR_TYPE_CD
+        FROM
+            CMS_VIEW_PRVDR_${DBENV}.v1_PRVDR_NPI_PIN_GRP pg
+        INNER JOIN
+            CMS_VIEW_PRVDR_${DBENV}.v1_PRVDR_HSTRY ph
+        ON  pg.PRVDR_SK = ph.PRVDR_SK
+        AND pg.PRVDR_NPI_PIN_BGN_DT BETWEEN ph.PRVDR_HSTRY_EFCTV_DT AND ph.PRVDR_HSTRY_OBSLT_DT
+        LEFT OUTER JOIN
+            CMS_BDM_OPI_${DBENV}.PRVDR_NPI_MSTR pnm
+        ON  ph.PRVDR_NPI_NUM = pnm.PRVDR_NPI_NUM
+        LEFT OUTER JOIN
+            CMS_VIEW_GEO_${DBENV}.V1_GEO_ZIP5_CD gz
+        ON gz.GEO_SK = pg.GEO_SK
+        LEFT OUTER JOIN
+             (SELECT
+                CLM_CNTRCTR_NUM
+             ,  CLM_CNTRCTR_BSI_CD
+             ,  ROW_NUMBER() OVER (PARTITION BY
+                                       CLM_CNTRCTR_NUM
+                                   ORDER BY
+                                       CLM_CNTRCTR_BSI_CD) AS BSI_CTR
+             FROM
+                 CMS_VIEW_CLM_CD_${DBENV}.v1_CLM_CNTRCTR_BSI
+             ) ccb
+        ON  ccb.CLM_CNTRCTR_NUM = pg.CLM_CNTRCTR_NUM
+        UNION ALL
+        SELECT
+            TRIM(pi.PRVDR_PIN_NUM)                                        AS PRVDR_PIN_NUM               --CHAR(14)
+        ,   pi.PRVDR_NPI_PIN_BGN_DT                                       AS PRVDR_NPI_PIN_BGN_DT        
+        ,   pi.PRVDR_NPI_PIN_END_DT                                       AS PRVDR_NPI_PIN_END_DT
+        ,   pi.CLM_CNTRCTR_NUM                                            AS CLM_CNTRCTR_NUM             --CHAR(5)
+        ,   SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 1 FOR 2) (CHAR(2))      AS PRVDR_CNTRCTR_USPS_STATE_CD --CHAR(2)
+        ,   SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) (CHAR(1))      AS PRVDR_CNTRCTR_TYPE_CD       --CHAR(1)
+        ,   CASE WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'CA'
+                          AND pi.CLM_CNTRCTR_NUM = '31140'
+                     THEN '0'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'CA'
+                          AND pi.CLM_CNTRCTR_NUM = '01102'
+                     THEN '1'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'CA'
+                          AND pi.CLM_CNTRCTR_NUM IN ('31146', '01192')
+                     THEN '2'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'MO'
+                          AND pi.CLM_CNTRCTR_NUM = '05302'
+                     THEN '0'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'MO'
+                          AND pi.CLM_CNTRCTR_NUM = '00523'
+                     THEN '1'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'MO'
+                          AND pi.CLM_CNTRCTR_NUM = '00740'
+                     THEN '2'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'NY'
+                          AND pi.CLM_CNTRCTR_NUM = '13202'
+                     THEN '0'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'NY'
+                          AND pi.CLM_CNTRCTR_NUM = '00803'
+                     THEN '1'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'NY'
+                          AND pi.CLM_CNTRCTR_NUM = '14330'
+                     THEN '2'
+                     WHEN     SUBSTRING(ccb.CLM_CNTRCTR_BSI_CD FROM 3 FOR 1) = 'NY'
+                          AND pi.CLM_CNTRCTR_NUM = '00801'
+                     THEN '3'
+                     ELSE '0'
+                 END (CHAR(1))                                            AS PRVDR_SBCNTRCTR_IND        --CHAR(1)
+        ,   pi.PRVDR_NPI_PIN_CLIA_NUM                                     AS PRVDR_CLIA_NUM             --CHAR(12)
+        ,   pi.PRVDR_NPI_PIN_CRDNTL_CD                                    AS PRVDR_PBX_CRDNTL_CD        --CHAR(5)
+        ,   dmf.SSA_DMF_DRVD_DEATH_DT                                     AS PRVDR_DEATH_DT             --DATE
+        --PRVDR_GRDTN_YR_NUM CHAR(4) (SUPER PES PROV-YEAR-GRADUATED)
+        ,   pi.PRVDR_NPI_PIN_GRP_SFX_NUM (CHAR(10))                       AS PRVDR_GRP_NUM              --CHAR(10)
+        ,   CAST(ccb.CLM_CNTRCTR_BSI_CD||CASE WHEN ccb.BSI_CTR <= 9
+                                              THEN '0'
+                                                  ELSE ''
+                                             END||ccb.BSI_CTR AS CHAR(5)) AS PRVDR_GRP_PREX_NUM        --CHAR(5)
+        --PRVDR_HBP_IND CHAR(1)
+        --PRVDR_LAST_UPDT_DT DATE ?????
+        ,   pnm.PRVDR_LCNS_ST_CD                                          AS PRVDR_LCNS_USPS_STATE_CD   --CHAR(2)
+        --PRVDR_PBX_MDCL_SCHL_CD CHAR(5) (SUPER PES PROV-MED-SCHOOL-CODE) ??????
+        --PRVDR_PBX_STUS_CD CHAR(2)
+        ,   pi.PRVDR_NPI_PIN_MDCR_BGN_DT                                  AS PRVDR_MDCR_ENRLMT_BGN_DT    --DATE
+        ,   pi.PRVDR_NPI_PIN_MDCR_END_DT                                  AS PRVDR_MDCR_ENRLMT_END_DT    --DATE
+        ,   'Y'                                                           AS PRVDR_MDCR_PRTCPTN_IND     --CHAR(1)
+        ,   ph.PRVDR_NPI_NUM                                              AS PRVDR_NPI_NUM              --CHAR(10)
+        ,   'P'                                                           AS PRVDR_NPI_SRC_ID           --CHAR(1)
+
+        ,   TRIM(pi.PRVDR_NPI_PIN_1ST_NAME)              (VARCHAR(25))    AS PRVDR_ADR_1ST_NAME       --VARCHAR(25)
+        ,   TRIM(pi.PRVDR_NPI_PIN_INVLD_PLC_NAME)        (VARCHAR(28))    AS PRVDR_ADR_CITY_NAME      --VARCHAR(28)
+        ,   pi.GEO_SK                                    (INTEGER)        AS PRVDR_ADR_GEO_SK         --INTEGER
+        ,   pi.GEO_ZIP4_CD                               (CHAR(4))        AS PRVDR_ADR_GEO_ZIP4_CD    --CHAR(4)
+        ,   LPAD(CAST(pi.GEO_SK AS VARCHAR(5)), 5, '0')  (CHAR(5))        AS PRVDR_ADR_GEO_ZIP5_CD    --CHAR(5)
+        ,   TRIM(pi.PRVDR_NPI_PIN_LAST_NAME)             (VARCHAR(35))    AS PRVDR_ADR_LAST_NAME      --VARCHAR(35)
+        ,   TRIM(pi.PRVDR_NPI_PIN_LINE_1_ADR)            (VARCHAR(100))   AS PRVDR_ADR_LINE_1_ADR     --VARCHAR(100)
+        ,   TRIM(pi.PRVDR_NPI_PIN_LINE_2_ADR)            (VARCHAR(100))   AS PRVDR_ADR_LINE_2_ADR     --VARCHAR(100)
+        ,   TRIM(pi.PRVDR_NPI_PIN_MDL_NAME)              (CHAR(1))        AS PRVDR_ADR_MDL_INITL_NAME --CHAR(1)
+        ,   NULL (VARCHAR(70))                                            AS PRVDR_ADR_ORG_NAME       --VARCHAR(70)
+        ,   ph.PRVDR_PRCTC_TEL_NUM                                        AS PRVDR_ADR_TEL_NUM        --CHAR(10)
+        ,   gz.GEO_FIPS_CNTY_CD                                           AS PRVDR_ADR_USPS_CNTY_CD   --CHAR(3)
+        ,   TRIM(pi.PRVDR_NPI_PIN_INVLD_STATE_CD)        (CHAR(2))        AS PRVDR_ADR_USPS_STATE_CD  --CHAR(2)
+
+        ,   pi.PRVDR_NPI_PIN_SPCLTY_CD                                    AS PRVDR_SPCLTY_CD            --CHAR(2)
+        ,   pi.PRVDR_NPI_PIN_STATE_LCNS_NUM                               AS PRVDR_STATE_LCNSD_NUM      --CHAR(12)
+        --PRVDR_PBX_STRUC_CD CHAR(2) (SUPER PES PROV-STRUCTURE-CODE) ????
+        ,   CASE WHEN pnm.PRVDR_SPCLTY_PRMRY_SW = 'N'
+                     THEN pnm.PRVDR_SPCLTY_CD
+                     WHEN pnm.PRVDR_2_SPCLTY_PRMRY_SW = 'N'
+                     THEN pnm.PRVDR_2_SPCLTY_CD
+                     WHEN pnm.PRVDR_SPCLTY_PRMRY_SW <> 'Y'
+                     THEN pnm.PRVDR_SPCLTY_CD
+                     WHEN pnm.PRVDR_2_SPCLTY_PRMRY_SW <> 'Y'
+                     THEN pnm.PRVDR_2_SPCLTY_CD
+                     ELSE NULL
+                END                                                       AS PRVDR_SUB_SPCLTY_CD        --CHAR(2)
+        ,   PRVDR_NPI_PIN_TIN_NUM                                         AS PRVDR_NPI_PIN_TIN_NUM      --CHAR(9)
+        ,   '0'                                                           AS PRVDR_TYPE_IND             --CHAR(1)
+        ,   PRVDR_NPI_PIN_UPIN_NUM                                        AS PRVDR_UPIN_NUM             --CHAR(6)
+        ,   NULL (CHAR(1))                                                AS PRVDR_GRP_CNTRCTR_TYPE_CD  --CHAR(1)
+        ,   NULL (CHAR(1))                                                AS PRVDR_GRP_SBCNTRCTR_SQNC   --CHAR(1)
+        ,   CAST(ccb.CLM_CNTRCTR_BSI_CD||CASE WHEN ccb.BSI_CTR <= 9
+                                              THEN '0'
+                                              ELSE ''
+                                         END||ccb.BSI_CTR AS CHAR(5))     AS PRVDR_ID_PREX_NUM          --CHAR(5)
+        ,   NULL (CHAR(2))                                                AS PRVDR_GRP_CNTRCTR_STATE_CD --CHAR(2)
+        ,   pi.PRVDR_LGCY_ADR_TYPE_CD                                     AS PRVDR_LGCY_ADR_TYPE_CD
+        FROM
+            CMS_VIEW_PRVDR_${DBENV}.v1_PRVDR_NPI_PIN_INDVDL pi
+        INNER JOIN
+           CMS_VIEW_PRVDR_${DBENV}.v1_PRVDR_HSTRY ph
+        ON  pi.PRVDR_SK = ph.PRVDR_SK
+        AND pi.PRVDR_NPI_PIN_BGN_DT BETWEEN ph.PRVDR_HSTRY_EFCTV_DT AND ph.PRVDR_HSTRY_OBSLT_DT
+        LEFT OUTER JOIN
+            CMS_BDM_OPI_${DBENV}.PRVDR_NPI_MSTR pnm
+        ON  ph.PRVDR_NPI_NUM = pnm.PRVDR_NPI_NUM
+        LEFT OUTER JOIN
+            CMS_VIEW_GEO_${DBENV}.V1_GEO_ZIP5_CD gz
+        ON gz.GEO_SK = pi.GEO_SK
+        LEFT OUTER JOIN
+            CMS_VIEW_SSADMF_${DBENV}.v1_PRSN_SSA_DMF dmf
+        ON  dmf.SSA_DMF_SSN_NUM = pnm. PRVDR_EMPLR_ID
+        AND pnm.PRVDR_EMPLR_ID_TYPE_CD = 'S'
+        LEFT OUTER JOIN
+             (SELECT
+                CLM_CNTRCTR_NUM
+             ,  CLM_CNTRCTR_BSI_CD
+             ,  ROW_NUMBER() OVER (PARTITION BY
+                                       CLM_CNTRCTR_NUM
+                                   ORDER BY
+                                       CLM_CNTRCTR_BSI_CD) AS BSI_CTR
+             FROM
+                 CMS_VIEW_CLM_CD_${DBENV}.v1_CLM_CNTRCTR_BSI
+             ) ccb
+        ON  ccb.CLM_CNTRCTR_NUM = pi.CLM_CNTRCTR_NUM
+    ) a
+    -- ONLY TAKE THE LAST ROW PER KEY REMOVE NPI GENERATED DUPLICATES
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY 
+                                   a.PRVDR_PIN_NUM
+                               ,   a.CLM_CNTRCTR_NUM
+                               ,   a.PRVDR_NPI_NUM
+                               ,   a.PRVDR_LGCY_ADR_TYPE_CD
+                               ,   a.PRVDR_MDCR_ENRLMT_BGN_DT 
+                               ORDER BY
+                                   a.PRVDR_NPI_PIN_BGN_DT DESC
+                               ,   a.PRVDR_MDCR_ENRLMT_END_DT DESC
+                               ,   a.PRVDR_NPI_PIN_END_DT DESC) = 1
+) b
+QUALIFY PRVDR_PBX_EFCTV_DT <= PRVDR_PBX_OBSLT_DT
+;
+
+UPDATE 
+    tpcpn
+FROM
+    CMS_STAGE_OPI_${DBENV}.TMP_PRVDR_CNTRCTR_PIN_NPI tpcpn
+,   (SELECT  
+          CLM_CNTRCTR_NUM
+     ,    PRVDR_PIN_NUM
+     ,    PRVDR_PBX_EFCTV_DT
+     ,    PRVDR_PBX_OBSLT_DT
+     ,    PRVDR_CNTRCTR_USPS_STATE_CD
+     ,    PRVDR_CNTRCTR_TYPE_CD
+     ,    PRVDR_LGCY_ADR_TYPE_CD
+     ,    PRVDR_SBCNTRCTR_IND
+     ,    PRVDR_CLIA_NUM
+     ,    PRVDR_PBX_CRDNTL_CD 
+     ,    PRVDR_DEATH_DT
+     ,    PRVDR_GRDTN_YR_NUM
+     ,    PRVDR_GRP_NUM
+     ,    PRVDR_GRP_PREX_NAME
+     ,    PRVDR_HBP_IND
+     ,    PRVDR_LCNS_USPS_STATE_CD
+     ,    PRVDR_PBX_MDCL_SCHL_CD 
+     ,    PRVDR_PBX_STUS_CD
+     ,    PRVDR_MDCR_ENRLMT_BGN_DT
+     ,    PRVDR_MDCR_ENRLMT_END_DT
+     ,    NXT_PRVDR_MDCR_ENRLMT_BGN_DT
+     ,    PRV_PRVDR_MDCR_ENRLMT_END_DT
+     ,    PRVDR_MDCR_PRTCPTN_IND
+     ,    PRVDR_NPI_NUM
+     ,    PRVDR_NPI_SRC_ID
+     ,    PRVDR_ADR_1ST_NAME
+     ,    PRVDR_ADR_CITY_NAME 
+     ,    PRVDR_ADR_GEO_SK
+     ,    PRVDR_ADR_GEO_ZIP4_CD 
+     ,    PRVDR_ADR_GEO_ZIP5_CD
+     ,    PRVDR_ADR_LAST_NAME
+     ,    PRVDR_ADR_LINE_1_ADR
+     ,    PRVDR_ADR_LINE_2_ADR
+     ,    PRVDR_ADR_MDL_INITL_NAME 
+     ,    PRVDR_ADR_ORG_NAME
+     ,    PRVDR_ADR_TEL_NUM
+     ,    PRVDR_ADR_USPS_CNTY_CD
+     ,    PRVDR_ADR_USPS_STATE_CD
+     ,    PRVDR_SPCLTY_CD
+     ,    PRVDR_STATE_LCNSD_NUM
+     ,    PRVDR_PBX_STRUC_CD
+     ,    PRVDR_SUB_SPCLTY_CD
+     ,    PRVDR_TIN_NUM
+     ,    PRVDR_TYPE_IND
+     ,    PRVDR_UPIN_NUM
+     ,    PRVDR_GRP_CNTRCTR_TYPE_CD
+     ,    PRVDR_GRP_SBCNTRCTR_SQNC
+     ,    PRVDR_ID_PREX_NUM
+     ,    PRVDR_GRP_CNTRCTR_STATE_CD
+     FROM 
+          CMS_STAGE_OPI_${DBENV}.TMP_PRVDR_CNTRCTR_PIN_NPI
+     MINUS
+     SELECT
+          CLM_CNTRCTR_NUM
+     ,    PRVDR_PIN_NUM
+     ,    PRVDR_PBX_EFCTV_DT
+     ,    PRVDR_PBX_OBSLT_DT            
+     ,    PRVDR_CNTRCTR_USPS_STATE_CD
+     ,    PRVDR_CNTRCTR_TYPE_CD
+     ,    PRVDR_LGCY_ADR_TYPE_CD
+     ,    PRVDR_SBCNTRCTR_IND
+     ,    PRVDR_CLIA_NUM
+     ,    PRVDR_PBX_CRDNTL_CD
+     ,    PRVDR_DEATH_DT
+     ,    PRVDR_GRDTN_YR_NUM
+     ,    PRVDR_GRP_NUM
+     ,    PRVDR_GRP_PREX_NAME
+     ,    PRVDR_HBP_IND
+     ,    PRVDR_LCNS_USPS_STATE_CD      
+     ,    PRVDR_PBX_MDCL_SCHL_CD        
+     ,    PRVDR_PBX_STUS_CD             
+     ,    PRVDR_MDCR_ENRLMT_BGN_DT      
+     ,    PRVDR_MDCR_ENRLMT_END_DT      
+     ,    NXT_PRVDR_MDCR_ENRLMT_BGN_DT  
+     ,    PRV_PRVDR_MDCR_ENRLMT_END_DT  
+     ,    PRVDR_MDCR_PRTCPTN_IND        
+     ,    PRVDR_NPI_NUM                 
+     ,    PRVDR_NPI_SRC_ID              
+     ,    PRVDR_ADR_1ST_NAME          
+     ,    PRVDR_ADR_CITY_NAME         
+     ,    PRVDR_ADR_GEO_SK            
+     ,    PRVDR_ADR_GEO_ZIP4_CD       
+     ,    PRVDR_ADR_GEO_ZIP5_CD       
+     ,    PRVDR_ADR_LAST_NAME         
+     ,    PRVDR_ADR_LINE_1_ADR        
+     ,    PRVDR_ADR_LINE_2_ADR        
+     ,    PRVDR_ADR_MDL_INITL_NAME    
+     ,    PRVDR_ADR_ORG_NAME          
+     ,    PRVDR_ADR_TEL_NUM           
+     ,    PRVDR_ADR_USPS_CNTY_CD      
+     ,    PRVDR_ADR_USPS_STATE_CD     
+     ,    PRVDR_SPCLTY_CD
+     ,    PRVDR_STATE_LCNSD_NUM
+     ,    PRVDR_PBX_STRUC_CD
+     ,    PRVDR_SUB_SPCLTY_CD
+     ,    PRVDR_TIN_NUM
+     ,    PRVDR_TYPE_IND
+     ,    PRVDR_UPIN_NUM
+     ,    PRVDR_GRP_CNTRCTR_TYPE_CD
+     ,    PRVDR_GRP_SBCNTRCTR_SQNC
+     ,    PRVDR_ID_PREX_NUM
+     ,    PRVDR_GRP_CNTRCTR_STATE_CD
+     FROM
+          CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI
+    ) difer 
+SET  PRVDR_LAST_UPDT_DT = DATE
+WHERE  
+    difer.CLM_CNTRCTR_NUM = tpcpn.CLM_CNTRCTR_NUM
+AND difer.PRVDR_PIN_NUM   = tpcpn.PRVDR_PIN_NUM
+AND difer.PRVDR_NPI_NUM   = tpcpn.PRVDR_NPI_NUM
+AND difer.NXT_PRVDR_MDCR_ENRLMT_BGN_DT = tpcpn.NXT_PRVDR_MDCR_ENRLMT_BGN_DT  
+AND difer.PRV_PRVDR_MDCR_ENRLMT_END_DT = tpcpn.PRV_PRVDR_MDCR_ENRLMT_END_DT  
+AND difer.PRVDR_LGCY_ADR_TYPE_CD       = tpcpn.PRVDR_LGCY_ADR_TYPE_CD
+;
+
+
+
+
+INSERT INTO CMS_STAGE_OPI_${DBENV}.TMP_PRVDR_CNTRCTR_PIN_NPI
+(
+     CLM_CNTRCTR_NUM
+,    PRVDR_PIN_NUM
+,    PRVDR_PBX_EFCTV_DT
+,    PRVDR_PBX_OBSLT_DT
+,    PRVDR_CNTRCTR_USPS_STATE_CD
+,    PRVDR_CNTRCTR_TYPE_CD
+,    PRVDR_LGCY_ADR_TYPE_CD
+,    PRVDR_SBCNTRCTR_IND
+,    PRVDR_CLIA_NUM
+,    PRVDR_PBX_CRDNTL_CD
+,    PRVDR_DEATH_DT
+,    PRVDR_GRDTN_YR_NUM
+,    PRVDR_GRP_NUM
+,    PRVDR_GRP_PREX_NAME
+,    PRVDR_HBP_IND
+,    PRVDR_LCNS_USPS_STATE_CD
+,    PRVDR_PBX_MDCL_SCHL_CD
+,    PRVDR_PBX_STUS_CD
+,    PRVDR_MDCR_ENRLMT_BGN_DT
+,    PRVDR_MDCR_ENRLMT_END_DT
+,    NXT_PRVDR_MDCR_ENRLMT_BGN_DT
+,    PRV_PRVDR_MDCR_ENRLMT_END_DT
+,    PRVDR_MDCR_PRTCPTN_IND
+,    PRVDR_NPI_NUM
+,    PRVDR_NPI_SRC_ID
+,    PRVDR_ADR_1ST_NAME
+,    PRVDR_ADR_CITY_NAME
+,    PRVDR_ADR_GEO_SK
+,    PRVDR_ADR_GEO_ZIP4_CD
+,    PRVDR_ADR_GEO_ZIP5_CD
+,    PRVDR_ADR_LAST_NAME
+,    PRVDR_ADR_LINE_1_ADR
+,    PRVDR_ADR_LINE_2_ADR
+,    PRVDR_ADR_MDL_INITL_NAME
+,    PRVDR_ADR_ORG_NAME
+,    PRVDR_ADR_TEL_NUM
+,    PRVDR_ADR_USPS_CNTY_CD
+,    PRVDR_ADR_USPS_STATE_CD
+,    PRVDR_SPCLTY_CD
+,    PRVDR_STATE_LCNSD_NUM
+,    PRVDR_PBX_STRUC_CD
+,    PRVDR_SUB_SPCLTY_CD
+,    PRVDR_TIN_NUM
+,    PRVDR_TYPE_IND
+,    PRVDR_UPIN_NUM
+,    PRVDR_GRP_CNTRCTR_TYPE_CD
+,    PRVDR_GRP_SBCNTRCTR_SQNC
+,    PRVDR_ID_PREX_NUM
+,    PRVDR_GRP_CNTRCTR_STATE_CD
+)
+SELECT 
+     a.CLM_CNTRCTR_NUM
+,    a.PRVDR_PIN_NUM
+,    a.PRVDR_PBX_EFCTV_DT
+,    a.PRVDR_PBX_OBSLT_DT
+,    a.PRVDR_CNTRCTR_USPS_STATE_CD
+,    a.PRVDR_CNTRCTR_TYPE_CD
+,    a.PRVDR_LGCY_ADR_TYPE_CD
+,    a.PRVDR_SBCNTRCTR_IND
+,    a.PRVDR_CLIA_NUM
+,    a.PRVDR_PBX_CRDNTL_CD
+,    a.PRVDR_DEATH_DT
+,    a.PRVDR_GRDTN_YR_NUM
+,    a.PRVDR_GRP_NUM
+,    a.PRVDR_GRP_PREX_NAME
+,    a.PRVDR_HBP_IND
+,    a.PRVDR_LCNS_USPS_STATE_CD
+,    a.PRVDR_PBX_MDCL_SCHL_CD
+,    a.PRVDR_PBX_STUS_CD
+,    a.PRVDR_MDCR_ENRLMT_BGN_DT
+,    a.PRVDR_MDCR_ENRLMT_END_DT
+,    a.NXT_PRVDR_MDCR_ENRLMT_BGN_DT
+,    a.PRV_PRVDR_MDCR_ENRLMT_END_DT
+,    a.PRVDR_MDCR_PRTCPTN_IND
+,    a.PRVDR_NPI_NUM
+,    a.PRVDR_NPI_SRC_ID
+,    a.PRVDR_ADR_1ST_NAME
+,    a.PRVDR_ADR_CITY_NAME
+,    a.PRVDR_ADR_GEO_SK
+,    a.PRVDR_ADR_GEO_ZIP4_CD
+,    a.PRVDR_ADR_GEO_ZIP5_CD
+,    a.PRVDR_ADR_LAST_NAME
+,    a.PRVDR_ADR_LINE_1_ADR
+,    a.PRVDR_ADR_LINE_2_ADR
+,    a.PRVDR_ADR_MDL_INITL_NAME
+,    a.PRVDR_ADR_ORG_NAME
+,    a.PRVDR_ADR_TEL_NUM
+,    a.PRVDR_ADR_USPS_CNTY_CD
+,    a.PRVDR_ADR_USPS_STATE_CD
+,    a.PRVDR_SPCLTY_CD
+,    a.PRVDR_STATE_LCNSD_NUM
+,    a.PRVDR_PBX_STRUC_CD
+,    a.PRVDR_SUB_SPCLTY_CD
+,    a.PRVDR_TIN_NUM
+,    a.PRVDR_TYPE_IND
+,    a.PRVDR_UPIN_NUM
+,    a.PRVDR_GRP_CNTRCTR_TYPE_CD
+,    a.PRVDR_GRP_SBCNTRCTR_SQNC
+,    a.PRVDR_ID_PREX_NUM
+,    a.PRVDR_GRP_CNTRCTR_STATE_CD
+FROM
+     CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI a
+INNER JOIN
+    (SELECT
+          CLM_CNTRCTR_NUM
+     ,    PRVDR_PIN_NUM
+     ,    PRVDR_NPI_NUM
+     ,    PRVDR_LGCY_ADR_TYPE_CD
+     FROM 
+          CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI 
+     MINUS
+     SELECT
+          CLM_CNTRCTR_NUM
+     ,    PRVDR_PIN_NUM
+     ,    PRVDR_NPI_NUM
+     ,    PRVDR_LGCY_ADR_TYPE_CD
+     FROM 
+          CMS_STAGE_OPI_${DBENV}.TMP_PRVDR_CNTRCTR_PIN_NPI
+     ) b 
+ON  a.CLM_CNTRCTR_NUM        = b.CLM_CNTRCTR_NUM
+AND a.PRVDR_PIN_NUM          = b.PRVDR_PIN_NUM
+AND a.PRVDR_NPI_NUM          = b.PRVDR_NPI_NUM
+AND a.PRVDR_LGCY_ADR_TYPE_CD = b.PRVDR_LGCY_ADR_TYPE_CD
+;
+
+
+BT;
+
+DELETE FROM CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI
+;
+
+INSERT INTO CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI
+SELECT * FROM CMS_STAGE_OPI_${DBENV}.TMP_PRVDR_CNTRCTR_PIN_NPI
+;
+
+
+ET;
+
+DROP TABLE CMS_STAGE_OPI_${DBENV}.TMP_PRVDR_CNTRCTR_PIN_NPI
+;
+
+
+
+--------------------------------------------------------------------------------------
+--- LOAD PRVDR_PIN_MASTER LOGIC
+--------------------------------------------------------------------------------------
+SELECT
+    'X'
+FROM
+    DBC.TABLES tables
+WHERE
+    tables.DatabaseName = 'CMS_STAGE_OPI_${DBENV}'
+AND tables.TableName    = 'TMP_OPI_PRVDR_CNTRCTR_PIN_KEY'
+;
+
+.IF ACTIVITYCOUNT=0 THEN .GOTO SKIPDROP2
+
+DROP TABLE CMS_STAGE_OPI_${DBENV}.TMP_OPI_PRVDR_CNTRCTR_PIN_KEY
+;
+.LABEL SKIPDROP2
+
+
+
+
+CREATE TABLE CMS_STAGE_OPI_${DBENV}.TMP_OPI_PRVDR_CNTRCTR_PIN_KEY AS 
+(SELECT
+     tmp.PRVDR_NPI_NUM
+ ,   tmp.CLM_CNTRCTR_NUM
+ ,   tmp.PRVDR_PIN_NUM
+ ,   npi_cnt.PRVDR_NPI_CNT
+ ,   tmp.PRVDR_PBX_EFCTV_DT
+ ,   COALESCE((MAX(tmp.PRVDR_PBX_EFCTV_DT) OVER (PARTITION  BY
+                                                     tmp.CLM_CNTRCTR_NUM
+                                                 ,   tmp.PRVDR_PIN_NUM
+                                                 ORDER BY 
+                                                     tmp.PRVDR_PBX_EFCTV_DT ROWS BETWEEN 1 FOLLOWING and 1 FOLLOWING) - 1)
+ ,   ('99991231' (DATE, FORMAT 'YYYYMMDD')) ) AS PRVDR_PBX_OBSLT_DT  
+FROM
+   (SELECT
+        a.PRVDR_NPI_NUM
+    ,   a.CLM_CNTRCTR_NUM
+    ,   a.PRVDR_PIN_NUM
+    ,   a.PRVDR_PBX_EFCTV_DT 
+    FROM 
+        CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI a
+    INNER JOIN
+       (SELECT
+            PRVDR_NPI_NUM
+        ,   CLM_CNTRCTR_NUM
+        ,   PRVDR_PIN_NUM
+        FROM 
+            CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI 
+        WHERE 
+            PRVDR_LGCY_ADR_TYPE_CD IN ('B','P')
+        QUALIFY ROW_NUMBER () OVER (PARTITION BY
+                                        CLM_CNTRCTR_NUM
+                                    ,   PRVDR_PIN_NUM
+                                    ORDER BY
+                                        CLM_CNTRCTR_NUM
+                                    ,   PRVDR_PIN_NUM
+                                    ,   (CASE WHEN PRVDR_LGCY_ADR_TYPE_CD = 'P' 
+                                              THEN 1
+                                              ELSE 2
+                                         END) 
+                                    ,   PRVDR_PBX_EFCTV_DT DESC
+                                    ,   PRVDR_NPI_NUM) = 1
+       ) b
+    ON  a.PRVDR_NPI_NUM   = b.PRVDR_NPI_NUM
+    AND a.CLM_CNTRCTR_NUM = b.CLM_CNTRCTR_NUM
+    AND a.PRVDR_PIN_NUM   = b.PRVDR_PIN_NUM
+    WHERE 
+        a.PRVDR_LGCY_ADR_TYPE_CD IN ('B','P')
+    GROUP BY 1,2,3,4
+    UNION
+    SELECT
+        a.PRVDR_NPI_NUM
+    ,   a.CLM_CNTRCTR_NUM
+    ,   a.PRVDR_PIN_NUM
+    ,   a.PRVDR_PBX_OBSLT_DT - 1 AS PRVDR_PBX_EFCTV_DT
+    FROM 
+        CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI a
+    INNER JOIN
+       ( SELECT
+             PRVDR_NPI_NUM
+         ,   CLM_CNTRCTR_NUM
+         ,   PRVDR_PIN_NUM
+         FROM 
+             CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI 
+         WHERE 
+             PRVDR_LGCY_ADR_TYPE_CD IN ('B','P')
+         QUALIFY ROW_NUMBER () OVER (PARTITION BY
+                                         CLM_CNTRCTR_NUM
+                                     ,   PRVDR_PIN_NUM
+                                     ORDER BY
+                                        CLM_CNTRCTR_NUM
+                                     ,  PRVDR_PIN_NUM
+                                     ,   (CASE WHEN PRVDR_LGCY_ADR_TYPE_CD = 'P' 
+                                               THEN 1
+                                               ELSE 2
+                                          END) 
+                                     ,   PRVDR_PBX_EFCTV_DT DESC
+                                     ,   PRVDR_NPI_NUM) = 1
+       ) b
+    ON  a.PRVDR_NPI_NUM   = b.PRVDR_NPI_NUM
+    AND a.CLM_CNTRCTR_NUM = b.CLM_CNTRCTR_NUM
+    AND a.PRVDR_PIN_NUM   = b.PRVDR_PIN_NUM
+    WHERE a.PRVDR_LGCY_ADR_TYPE_CD IN ('B','P')
+    AND a.PRVDR_PBX_OBSLT_DT < ('9999/12/31' (DATE, FORMAT 'YYYY/MM/DD'))
+    GROUP BY 1,2,3,4
+    ) tmp
+INNER JOIN 
+    (SELECT
+         CLM_CNTRCTR_NUM
+     ,   PRVDR_PIN_NUM
+     ,   COUNT(DISTINCT PRVDR_NPI_NUM) AS PRVDR_NPI_CNT
+     FROM 
+         CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI 
+     WHERE 
+         PRVDR_LGCY_ADR_TYPE_CD IN ('B','P')
+     GROUP BY 1,2
+    ) npi_cnt
+ON  tmp.CLM_CNTRCTR_NUM = npi_cnt.CLM_CNTRCTR_NUM
+AND tmp.PRVDR_PIN_NUM   = npi_cnt.PRVDR_PIN_NUM
+) WITH DATA
+UNIQUE PRIMARY INDEX (CLM_CNTRCTR_NUM, PRVDR_PIN_NUM, PRVDR_PBX_EFCTV_DT)
+;
+
+
+BT;
+
+
+DELETE FROM CMS_BDM_OPI_${DBENV}.PRVDR_PIN_MSTR;
+
+INSERT INTO CMS_BDM_OPI_${DBENV}.PRVDR_PIN_MSTR
+(
+    PRVDR_NPI_CNT
+,   PRVDR_NPI_NUM
+,   CLM_CNTRCTR_NUM
+,   PRVDR_PIN_NUM
+,   PRVDR_PBX_EFCTV_DT
+,   PRVDR_PBX_OBSLT_DT  
+
+,   PRVDR_CLIA_NUM
+,   PRVDR_CNTRCTR_TYPE_CD
+,   PRVDR_CNTRCTR_USPS_STATE_CD
+,   PRVDR_PBX_CRDNTL_CD
+,   PRVDR_DEATH_DT
+,   PRVDR_GRDTN_YR_NUM
+,   PRVDR_GRP_NUM
+,   PRVDR_GRP_PREX_NAME
+,   PRVDR_HBP_IND
+,   PRVDR_LAST_UPDT_DT 
+,   PRVDR_LCNS_USPS_STATE_CD
+,   PRVDR_PBX_MDCL_SCHL_CD
+,   PRVDR_PBX_MDCL_SCHL_DESC
+,   PRVDR_MDCR_ENRLMT_BGN_DT
+,   PRVDR_MDCR_ENRLMT_END_DT
+,   PRVDR_MDCR_PRTCPTN_IND
+,   PRVDR_NPI_SRC_ID
+,   PRVDR_PRCTC_1ST_NAME
+,   PRVDR_PRCTC_MDL_INITL_NAME
+,   PRVDR_PRCTC_LAST_NAME
+,   PRVDR_PRCTC_CITY_NAME
+,   PRVDR_PRCTC_GEO_SK
+,   PRVDR_PRCTC_GEO_ZIP4_CD
+,   PRVDR_PRCTC_GEO_ZIP5_CD
+,   PRVDR_PRCTC_LINE_1_ADR
+,   PRVDR_PRCTC_LINE_2_ADR
+,   PRVDR_PRCTC_ORG_NAME
+,   PRVDR_PRCTC_TEL_NUM
+,   PRVDR_PRCTC_USPS_CNTY_CD
+,   PRVDR_PRCTC_USPS_STATE_CD
+,   PRVDR_PYEE_1ST_NAME
+,   PRVDR_PYEE_MDL_INITL_NAME
+,   PRVDR_PYEE_LAST_NAME
+,   PRVDR_PYEE_CITY_NAME
+,   PRVDR_PYEE_GEO_SK 
+,   PRVDR_PYEE_GEO_ZIP4_CD
+,   PRVDR_PYEE_GEO_ZIP5_CD
+,   PRVDR_PYEE_LINE_1_ADR
+,   PRVDR_PYEE_LINE_2_ADR
+,   PRVDR_PYEE_ORG_NAME
+,   PRVDR_PYEE_TEL_NUM
+,   PRVDR_PYEE_USPS_STATE_CD
+,   PRVDR_SBCNTRCTR_IND
+,   PRVDR_SPCLTY_CD
+,   PRVDR_STATE_LCNSD_NUM
+,   PRVDR_PBX_STRUC_CD 
+,   PRVDR_PBX_STRUC_DESC
+,   PRVDR_PBX_STUS_CD
+,   PRVDR_PBX_STUS_CD_DESC
+,   PRVDR_SUB_SPCLTY_CD
+,   PRVDR_TIN_NUM
+,   PRVDR_TYPE_IND
+,   PRVDR_UPIN_NUM
+,   PRVDR_GRP_CNTRCTR_TYPE_CD
+,   PRVDR_GRP_SBCNTRCTR_SQNC
+,   PRVDR_ID_PREX_NUM
+,   PRVDR_GRP_CNTRCTR_STATE_CD
+,   META_SK
+)
+SELECT
+    a.PRVDR_NPI_CNT
+,   a.PRVDR_NPI_NUM
+,   a.CLM_CNTRCTR_NUM
+,   a.PRVDR_PIN_NUM
+,   a.PRVDR_PBX_EFCTV_DT
+,   a.PRVDR_PBX_OBSLT_DT
+
+,   COALESCE(p.PRVDR_CLIA_NUM              , b.PRVDR_CLIA_NUM)              AS PRVDR_CLIA_NUM
+,   COALESCE(p.PRVDR_CNTRCTR_TYPE_CD       , b.PRVDR_CNTRCTR_TYPE_CD)       AS PRVDR_CNTRCTR_TYPE_CD
+,   COALESCE(p.PRVDR_CNTRCTR_USPS_STATE_CD , b.PRVDR_CNTRCTR_USPS_STATE_CD) AS PRVDR_CNTRCTR_USPS_STATE_CD
+,   COALESCE(p.PRVDR_PBX_CRDNTL_CD         , b.PRVDR_PBX_CRDNTL_CD)         AS PRVDR_PBX_CRDNTL_CD
+,   COALESCE(p.PRVDR_DEATH_DT              , b.PRVDR_DEATH_DT)              AS PRVDR_DEATH_DT
+,   COALESCE(p.PRVDR_GRDTN_YR_NUM          , b.PRVDR_GRDTN_YR_NUM)          AS PRVDR_GRDTN_YR_NUM
+,   COALESCE(p.PRVDR_GRP_NUM               , b.PRVDR_GRP_NUM)               AS PRVDR_GRP_NUM
+,   COALESCE(p.PRVDR_GRP_PREX_NAME         , b.PRVDR_GRP_PREX_NAME)         AS PRVDR_GRP_PREX_NAME
+,   COALESCE(p.PRVDR_HBP_IND               , b.PRVDR_HBP_IND)               AS PRVDR_HBP_IND
+,   COALESCE(p.PRVDR_LAST_UPDT_DT          , b.PRVDR_LAST_UPDT_DT)          AS PRVDR_LAST_UPDT_DT
+,   COALESCE(p.PRVDR_LCNS_USPS_STATE_CD    , b.PRVDR_LCNS_USPS_STATE_CD)    AS PRVDR_LCNS_USPS_STATE_CD
+,   COALESCE(p.PRVDR_PBX_MDCL_SCHL_CD      , b.PRVDR_PBX_MDCL_SCHL_CD)      AS PRVDR_PBX_MDCL_SCHL_CD
+,   m.PRVDR_PBX_MDCL_SCHL_DESC
+,   COALESCE(p.PRVDR_MDCR_ENRLMT_BGN_DT    , b.PRVDR_MDCR_ENRLMT_BGN_DT)    AS PRVDR_MDCR_ENRLMT_BGN_DT
+,   COALESCE(p.PRVDR_MDCR_ENRLMT_END_DT    , b.PRVDR_MDCR_ENRLMT_END_DT)    AS PRVDR_MDCR_ENRLMT_END_DT
+,   COALESCE(p.PRVDR_MDCR_PRTCPTN_IND      , b.PRVDR_MDCR_PRTCPTN_IND)      AS PRVDR_MDCR_PRTCPTN_IND
+,   COALESCE(p.PRVDR_NPI_SRC_ID            , b.PRVDR_NPI_SRC_ID)            AS PRVDR_NPI_SRC_ID
+
+,   p.PRVDR_ADR_1ST_NAME       AS PRVDR_PRCTC_1ST_NAME
+,   p.PRVDR_ADR_MDL_INITL_NAME AS PRVDR_PRCTC_MDL_INITL_NAME
+,   p.PRVDR_ADR_LAST_NAME      AS PRVDR_PRCTC_LAST_NAME
+,   p.PRVDR_ADR_CITY_NAME      AS PRVDR_PRCTC_CITY_NAME
+,   p.PRVDR_ADR_GEO_SK         AS PRVDR_PRCTC_GEO_SK
+,   p.PRVDR_ADR_GEO_ZIP4_CD    AS PRVDR_PRCTC_GEO_ZIP4_CD
+,   p.PRVDR_ADR_GEO_ZIP5_CD    AS PRVDR_PRCTC_GEO_ZIP5_CD
+,   p.PRVDR_ADR_LINE_1_ADR     AS PRVDR_PRCTC_LINE_1_ADR
+,   p.PRVDR_ADR_LINE_2_ADR     AS PRVDR_PRCTC_LINE_2_ADR
+,   p.PRVDR_ADR_ORG_NAME       AS PRVDR_PRCTC_ORG_NAME
+,   p.PRVDR_ADR_TEL_NUM        AS PRVDR_PRCTC_TEL_NUM
+,   p.PRVDR_ADR_USPS_CNTY_CD   AS PRVDR_PRCTC_USPS_CNTY_CD
+,   p.PRVDR_ADR_USPS_STATE_CD  AS PRVDR_PRCTC_USPS_STATE_CD
+
+,   b.PRVDR_ADR_1ST_NAME       AS PRVDR_PYEE_1ST_NAME
+,   b.PRVDR_ADR_MDL_INITL_NAME AS PRVDR_PYEE_MDL_INITL_NAME
+,   b.PRVDR_ADR_LAST_NAME      AS PRVDR_PYEE_LAST_NAME
+,   b.PRVDR_ADR_CITY_NAME      AS PRVDR_PYEE_CITY_NAME
+,   b.PRVDR_ADR_GEO_SK         AS PRVDR_PYEE_GEO_SK
+,   b.PRVDR_ADR_GEO_ZIP4_CD    AS PRVDR_PYEE_GEO_ZIP4_CD
+,   b.PRVDR_ADR_GEO_ZIP5_CD    AS PRVDR_PYEE_GEO_ZIP5_CD
+,   b.PRVDR_ADR_LINE_1_ADR     AS PRVDR_PYEE_LINE_1_ADR
+,   b.PRVDR_ADR_LINE_2_ADR     AS PRVDR_PYEE_LINE_2_ADR
+,   b.PRVDR_ADR_ORG_NAME       AS PRVDR_PYEE_ORG_NAME
+,   b.PRVDR_ADR_TEL_NUM        AS PRVDR_PYEE_TEL_NUM
+,   b.PRVDR_ADR_USPS_STATE_CD  AS PRVDR_PYEE_USPS_STATE_CD
+
+,   COALESCE(p.PRVDR_SBCNTRCTR_IND       , b.PRVDR_SBCNTRCTR_IND)        AS PRVDR_SBCNTRCTR_IND
+,   COALESCE(p.PRVDR_SPCLTY_CD           , b.PRVDR_SPCLTY_CD)            AS PRVDR_SPCLTY_CD
+,   COALESCE(p.PRVDR_STATE_LCNSD_NUM     , b.PRVDR_STATE_LCNSD_NUM)      AS PRVDR_STATE_LCNSD_NUM
+,   COALESCE(p.PRVDR_PBX_STRUC_CD        , b.PRVDR_PBX_STRUC_CD)         AS PRVDR_PBX_STRUC_CD
+,   t.PRVDR_PBX_STRUC_DESC
+,   COALESCE(p.PRVDR_PBX_STUS_CD         , b.PRVDR_PBX_STUS_CD)          AS PRVDR_PBX_STUS_CD
+,   s.PRVDR_PBX_STUS_CD_DESC
+,   COALESCE(p.PRVDR_SUB_SPCLTY_CD       , b.PRVDR_SUB_SPCLTY_CD)        AS PRVDR_SUB_SPCLTY_CD
+,   COALESCE(p.PRVDR_TIN_NUM             , b.PRVDR_TIN_NUM)              AS PRVDR_TIN_NUM
+,   COALESCE(p.PRVDR_TYPE_IND            , b.PRVDR_TYPE_IND)             AS PRVDR_TYPE_IND
+,   COALESCE(p.PRVDR_UPIN_NUM            , b.PRVDR_UPIN_NUM)             AS PRVDR_UPIN_NUM
+,   COALESCE(p.PRVDR_GRP_CNTRCTR_TYPE_CD , b.PRVDR_GRP_CNTRCTR_TYPE_CD)  AS PRVDR_GRP_CNTRCTR_TYPE_CD
+,   COALESCE(p.PRVDR_GRP_SBCNTRCTR_SQNC  , b.PRVDR_GRP_SBCNTRCTR_SQNC)   AS PRVDR_GRP_SBCNTRCTR_SQNC
+,   COALESCE(p.PRVDR_ID_PREX_NUM         , b.PRVDR_ID_PREX_NUM)          AS PRVDR_ID_PREX_NUM
+,   COALESCE(p.PRVDR_GRP_CNTRCTR_STATE_CD, b.PRVDR_GRP_CNTRCTR_STATE_CD) AS PRVDR_GRP_CNTRCTR_STATE_CD
+,   COALESCE(p.META_SK                , b.META_SK)                AS META_SK
+FROM 
+    CMS_STAGE_OPI_${DBENV}.TMP_OPI_PRVDR_CNTRCTR_PIN_KEY a
+LEFT OUTER JOIN 
+    CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI  p
+ON  a.PRVDR_NPI_NUM          =  p.PRVDR_NPI_NUM
+AND a.CLM_CNTRCTR_NUM        =  p.CLM_CNTRCTR_NUM
+AND a.PRVDR_PIN_NUM          =  p.PRVDR_PIN_NUM
+AND p.PRVDR_PBX_EFCTV_DT     <= a.PRVDR_PBX_EFCTV_DT 
+AND a.PRVDR_PBX_OBSLT_DT     <= p.PRVDR_PBX_OBSLT_DT
+AND p.PRVDR_LGCY_ADR_TYPE_CD = 'P'
+AND p.PRVDR_PBX_EFCTV_DT IS NOT NULL
+LEFT OUTER JOIN 
+    CMS_BDM_OPI_${DBENV}.PRVDR_CNTRCTR_PIN_NPI  b
+ON  a.PRVDR_NPI_NUM          = b.PRVDR_NPI_NUM
+AND a.CLM_CNTRCTR_NUM        = b.CLM_CNTRCTR_NUM
+AND a.PRVDR_PIN_NUM          = b.PRVDR_PIN_NUM
+AND b.PRVDR_PBX_EFCTV_DT    <= a.PRVDR_PBX_EFCTV_DT 
+AND a.PRVDR_PBX_OBSLT_DT    <= b.PRVDR_PBX_OBSLT_DT
+AND b.PRVDR_LGCY_ADR_TYPE_CD = 'B'
+LEFT OUTER JOIN 
+    CMS_VIEW_PRVDR_CD_${DBENV}.V1_PRVDR_PBX_STUS_CD s
+ON  p.PRVDR_PBX_STUS_CD = s.PRVDR_PBX_STUS_CD
+LEFT OUTER JOIN 
+    CMS_VIEW_PRVDR_CD_${DBENV}.V1_PRVDR_PBX_STRUC_CD t
+ON  p.PRVDR_PBX_STRUC_CD = t.PRVDR_PBX_STRUC_CD
+LEFT OUTER JOIN 
+    CMS_VIEW_PRVDR_CD_${DBENV}.V1_PRVDR_PBX_MDCL_SCHL_CD m
+ON  p.PRVDR_PBX_MDCL_SCHL_CD = m.PRVDR_PBX_MDCL_SCHL_CD
+WHERE 
+    p.PRVDR_PBX_EFCTV_DT IS NOT NULL 
+OR  b.PRVDR_PBX_EFCTV_DT IS NOT NULL
+;
+
+
+ET;
+
+
+.QUIT;
+!
