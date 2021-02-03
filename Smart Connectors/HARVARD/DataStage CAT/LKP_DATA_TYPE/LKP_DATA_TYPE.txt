@@ -1,0 +1,17 @@
+DATATYPE_ID;DATATYPE_NAME
+1;Char
+9;Date
+9;Time
+3;Decimal
+11;Timestamp
+-5;BigInt
+4;Integer
+4;SmallInt
+-2;Binary
+8;Double
+6;Float
+-8;Nchar
+2;Numeric
+-6;NVarchar
+-9;NVarchar
+12;Varchar

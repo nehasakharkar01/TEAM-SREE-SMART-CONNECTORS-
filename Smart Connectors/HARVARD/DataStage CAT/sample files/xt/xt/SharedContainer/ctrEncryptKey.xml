@@ -1,0 +1,980 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DSExport>
+   <Header CharacterSet="CP1252" ExportingTool="IBM InfoSphere DataStage Export" ToolVersion="8" ServerName="LNAPPU022.HPHC.ORG" ToolInstanceID="TST_XT" Date="2020-04-17" Time="08.44.53" ServerVersion="11.7"/>
+   <SharedContainer Identifier="ctrEncryptKey" DateModified="2019-06-21" TimeModified="01.13.23">
+      <Record Identifier="ROOT" Type="ContainerDefn" Readonly="0">
+         <Property Name="Name">ctrEncryptKey</Property>
+         <Property Name="Description" PreFormatted="1">Encrypts the input String Using the input Key
+
+Encryption Steps:
+
+1)Take the first character of the data and covert it to its ASCII number
+2)Take the first character of the seed and covert it to its ASCII number
+3)XOR both of them. Result will be a number between 0 and 255. Convert this number to its equivalent binary value and store the result (8 bytes of &apos;0&apos; and &apos;1&apos;) into a temporary variable
+4)Repeat until end of data appending the result to the temporary variable created in step 3. If data length is greater than seed length, start from the beginning of the seed again. Note: While reusing the seed, instead of first character in the seed, use null (X&apos;00&apos;) as seed character.
+5)Now the temporary variable will have a string of &apos;0&apos;s and &apos;1&apos;s. 
+6)Take 5 bytes at a time and convert it to a decimal number; This could be from 0 - 31
+7)Map this number to its equivalent ASCII value making necessary adjustments to ensure that it is mapped to an upper case character or a number. The way it is done is:
+oAdd 65 to the number generated in step 6
+oIf the result is greater than 90, subtract 43 from it.
+oGet the ASCII value for the result
+8)Repeat until the end of the temporary variable
+</Property>
+         <Property Name="ContainerType">0</Property>
+         <Property Name="View">V9</Property>
+         <Property Name="Version">56.0.0</Property>
+         <Property Name="Category">\Shared Containers</Property>
+         <Property Name="NextID">13</Property>
+         <Collection Name="Parameters" Type="Parameters">
+            <SubRecord>
+               <Property Name="Name">EncrKey</Property>
+               <Property Name="Prompt">Encrypition Key</Property>
+               <Property Name="Default">GICDSENCKEY</Property>
+               <Property Name="ParamType">0</Property>
+               <Property Name="ParamLength">0</Property>
+               <Property Name="ParamScale">0</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="JobType">3</Property>
+         <Property Name="RuntimeColumnPropagation">0</Property>
+      </Record>
+      <Record Identifier="V12S0" Type="TransformerStage" Readonly="0">
+         <Property Name="Name">trn1</Property>
+         <Property Name="NextID">5</Property>
+         <Property Name="InputPins">V12S0P4</Property>
+         <Property Name="OutputPins">V12S0P2</Property>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">TrxGenCode</Property>
+               <Property Name="Value" PreFormatted="1">//
+// Generated file to implement the V12S0_ctrEncryptKey_trn1 transform operator.
+//
+
+// define our input/output link names
+inputname 0 outRm_dup;
+outputname 0 frmtrn1;
+
+global {
+	// Job parameter declaration
+	string EncrKey;
+}
+
+initialize {
+	// define our control variables
+	int8 RowRejected0;
+	int8 NullSetVar0;
+	uint64 Iteration0;
+
+
+	// get any loop warning threshold
+	int64 LoopThreshold0;
+	string LoopThresholdEnv0;
+	string LoopThresholdName0;
+	LoopThresholdName0 = &quot;APT_TRANSFORM_LOOP_WARNING_THRESHOLD&quot;;
+	LoopThresholdEnv0 = get_environment(LoopThresholdName0);
+	if ((LoopThresholdEnv0 == &quot;&quot;) || (LoopThresholdEnv0 == &quot;-1&quot;)) {
+		LoopThreshold0 = 10000;
+	} else {
+		LoopThreshold0 = LoopThresholdEnv0;
+	}
+
+	// declare our intermediate variables for this section
+	string InterVar0_11;
+
+}
+
+mainloop {
+	Iteration0 = 1;
+
+	// declare our intermediate variables for this section
+	int32 InterVar0_0;
+	uint64 InterVar0_1;
+	uint64 InterVar0_2;
+	string InterVar0_3;
+	string InterVar0_4;
+	string InterVar0_5;
+	string InterVar0_6;
+	string InterVar0_7;
+	string InterVar0_8;
+	string InterVar0_9;
+	string InterVar0_10;
+
+	// Loop variable declaration and initialisation
+	int32 LoopVar0_lvdataCounter;
+	LoopVar0_lvdataCounter = 0;
+	int32 LoopVar0_lvseedCounter;
+	LoopVar0_lvseedCounter = 0;
+	int32 LoopVar0_lvseedChar;
+	LoopVar0_lvseedChar = 0;
+	int32 LoopVar0_lvdataChar;
+	LoopVar0_lvdataChar = 0;
+	int32 LoopVar0_lvtmpDecimal;
+	LoopVar0_lvtmpDecimal = 0;
+	string LoopVar0_lvtmpBinary;
+	LoopVar0_lvtmpBinary = &quot;&quot;;
+	string LoopVar0_lvbinaryString;
+	LoopVar0_lvbinaryString = &quot;&quot;;
+
+
+	while ((LoopVar0_lvdataCounter &lt; string_length(outRm_dup.Encrypt_Column))) {
+
+		// evaluate the loop variables
+		LoopVar0_lvdataCounter = (LoopVar0_lvdataCounter + 1);
+		if ((LoopVar0_lvseedCounter &gt; string_length(EncrKey))) {
+			LoopVar0_lvseedCounter = 2;
+		} else {
+			InterVar0_0 = LoopVar0_lvseedCounter + 1;
+			LoopVar0_lvseedCounter = InterVar0_0;
+		}
+		//;
+		LoopVar0_lvseedChar = num_from_char(substring_1(EncrKey , LoopVar0_lvseedCounter , 1));
+		LoopVar0_lvdataChar = num_from_char(substring_1(outRm_dup.Encrypt_Column , LoopVar0_lvdataCounter , 1));
+		InterVar0_1 = LoopVar0_lvdataChar;
+		InterVar0_2 = LoopVar0_lvseedChar;
+		LoopVar0_lvtmpDecimal = (InterVar0_1 ^ InterVar0_2);
+		InterVar0_3 = quotient_from_dfloat(LoopVar0_lvtmpDecimal , 128);
+		InterVar0_4 = quotient_from_dfloat((LoopVar0_lvtmpDecimal % 128) , 64);
+		InterVar0_5 = quotient_from_dfloat(((LoopVar0_lvtmpDecimal % 128) % 64) , 32);
+		InterVar0_6 = quotient_from_dfloat((((LoopVar0_lvtmpDecimal % 128) % 64) % 32) , 16);
+		InterVar0_7 = quotient_from_dfloat(((((LoopVar0_lvtmpDecimal % 128) % 64) % 32) % 16) , 8);
+		InterVar0_8 = quotient_from_dfloat((((((LoopVar0_lvtmpDecimal % 128) % 64) % 32) % 16) % 8) , 4);
+		InterVar0_9 = quotient_from_dfloat(((((((LoopVar0_lvtmpDecimal % 128) % 64) % 32) % 16) % 8) % 4) , 2);
+		InterVar0_10 = ((((((LoopVar0_lvtmpDecimal % 128) % 64) % 32) % 16) % 8) % 4) % 2;
+		LoopVar0_lvtmpBinary = (((((((InterVar0_3 + InterVar0_4) + InterVar0_5) + InterVar0_6) + InterVar0_7) + InterVar0_8) + InterVar0_9) + InterVar0_10);
+		LoopVar0_lvbinaryString = (LoopVar0_lvbinaryString + LoopVar0_lvtmpBinary);
+
+
+		// initialise the rejected row variable
+		RowRejected0 = 1;
+
+		// evaluate constraint and columns for link: frmtrn1
+		if ((LoopVar0_lvdataCounter == string_length(outRm_dup.Encrypt_Column)))
+		{
+			frmtrn1.Binary_String = LoopVar0_lvbinaryString;
+			writerecord 0;
+			RowRejected0 = 0;
+		}
+
+		// Check for hitting the warning threshold
+		if (LoopThreshold0 &gt; 0) {
+			if ((Iteration0 % LoopThreshold0) == 0) {
+				InterVar0_11 = Iteration0;
+				print_warning(&quot;The warning threshold for the number of output row iterations processed per single input row has been reached. Number of output row iterations: &quot; + InterVar0_11 + &quot;. This is just a warning and the job will continue.&quot;);
+			}
+		}
+		Iteration0 = Iteration0 + 1;
+	}
+}
+
+finish {
+}
+</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">JobParameterNames</Property>
+               <Property Name="Value">EncrKey</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">TrxGenCache</Property>
+               <Property Name="Value">1</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">TrxClassName</Property>
+               <Property Name="Value">V12S0_ctrEncryptKey_trn1</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="ValidationStatus">0</Property>
+         <Property Name="StageType">CTransformerStage</Property>
+         <Property Name="BlockSize">0</Property>
+         <Property Name="SKKeySourceType">file</Property>
+         <Collection Name="LoopCondition" Type="StageVar">
+            <SubRecord>
+               <Property Name="Name">$LoopCondition</Property>
+               <Property Name="Expression">lvdataCounter &lt; Len(outRm_dup.Encrypt_Column)</Property>
+               <Property Name="SqlType">3</Property>
+               <Property Name="ParsedExpression">lvdataCounter &lt; Len(outRm_dup.Encrypt_Column)</Property>
+               <Property Name="SourceColumn">outRm_dup.Encrypt_Column</Property>
+               <Property Name="StageVars">\(1B)lvdataCounter</Property>
+               <Property Name="Precision">18</Property>
+               <Property Name="ColScale">4</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+         </Collection>
+         <Collection Name="LoopVars" Type="StageVar">
+            <SubRecord>
+               <Property Name="Name">lvdataCounter</Property>
+               <Property Name="Expression">lvdataCounter + 1</Property>
+               <Property Name="InitialValue">0</Property>
+               <Property Name="SqlType">4</Property>
+               <Property Name="ParsedExpression">lvdataCounter + 1</Property>
+               <Property Name="StageVars">\(1B)lvdataCounter</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvseedCounter</Property>
+               <Property Name="Expression">if lvseedCounter &gt; Len(EncrKey) Then 2 Else lvseedCounter + 1</Property>
+               <Property Name="InitialValue">0</Property>
+               <Property Name="SqlType">4</Property>
+               <Property Name="ParsedExpression">\(20)if lvseedCounter &gt; Len(EncrKey) Then 2 Else lvseedCounter + 1</Property>
+               <Property Name="StageVars">\(1B)lvseedCounter</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvseedChar</Property>
+               <Property Name="Expression">Seq(EncrKey[lvseedCounter,1])</Property>
+               <Property Name="SqlType">4</Property>
+               <Property Name="ParsedExpression">Seq(EncrKey[lvseedCounter, 1])</Property>
+               <Property Name="StageVars">\(1B)lvseedCounter</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvdataChar</Property>
+               <Property Name="Expression">Seq(outRm_dup.Encrypt_Column[lvdataCounter,1])</Property>
+               <Property Name="SqlType">4</Property>
+               <Property Name="ParsedExpression">Seq(outRm_dup.Encrypt_Column[lvdataCounter, 1])</Property>
+               <Property Name="SourceColumn">outRm_dup.Encrypt_Column</Property>
+               <Property Name="StageVars">\(1B)lvdataCounter</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvtmpDecimal</Property>
+               <Property Name="Expression">BitXor(lvdataChar, lvseedChar)</Property>
+               <Property Name="SqlType">4</Property>
+               <Property Name="ParsedExpression">BitXor(lvdataChar, lvseedChar)</Property>
+               <Property Name="StageVars">\(1B)lvdataChar;lvseedChar</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvtmpBinary</Property>
+               <Property Name="Expression" PreFormatted="1">Div(lvtmpDecimal,128) : Div(Mod(lvtmpDecimal,128),64) : Div(Mod(Mod(lvtmpDecimal,128),64),32) :
+Div(Mod(Mod(Mod(lvtmpDecimal,128),64),32),16) : Div(Mod(Mod(Mod(Mod(lvtmpDecimal,128),64),32),16),8) :
+Div(Mod(Mod(Mod(Mod(Mod(lvtmpDecimal,128),64),32),16),8),4) : Div(Mod(Mod(Mod(Mod(Mod(Mod(lvtmpDecimal,128),64),32),16),8),4),2) :
+Mod(Mod(Mod(Mod(Mod(Mod(Mod(lvtmpDecimal,128),64),32),16),8),4),2)</Property>
+               <Property Name="SqlType">12</Property>
+               <Property Name="ParsedExpression">Div(lvtmpDecimal, 128) : Div(Mod(lvtmpDecimal, 128), 64) : Div(Mod(Mod(lvtmpDecimal, 128), 64), 32) : Div(Mod(Mod(Mod(lvtmpDecimal, 128), 64), 32), 16) : Div(Mod(Mod(Mod(Mod(lvtmpDecimal, 128), 64), 32), 16), 8) : Div(Mod(Mod(Mod(Mod(Mod(lvtmpDecimal, 128), 64), 32), 16), 8), 4) : Div(Mod(Mod(Mod(Mod(Mod(Mod(lvtmpDecimal, 128), 64), 32), 16), 8), 4), 2) : Mod(Mod(Mod(Mod(Mod(Mod(Mod(lvtmpDecimal, 128), 64), 32), 16), 8), 4), 2)</Property>
+               <Property Name="StageVars">\(1B)lvtmpDecimal</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvbinaryString</Property>
+               <Property Name="Expression">lvbinaryString : lvtmpBinary</Property>
+               <Property Name="SqlType">12</Property>
+               <Property Name="ParsedExpression">lvbinaryString : lvtmpBinary</Property>
+               <Property Name="StageVars">\(1B)lvbinaryString;lvtmpBinary</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="StageVarsMinimised">0</Property>
+         <Property Name="LoopVarsMaximised">1</Property>
+         <Property Name="MaxLoopIterations">0</Property>
+      </Record>
+      <Record Identifier="V12S0P2" Type="TrxOutput" Readonly="0">
+         <Property Name="Name">frmtrn1</Property>
+         <Property Name="Partner">V12S2|V12S2P1</Property>
+         <Property Name="Constraint">lvdataCounter = Len(outRm_dup.Encrypt_Column)</Property>
+         <Property Name="Reject">0</Property>
+         <Property Name="ErrorPin">0</Property>
+         <Property Name="RowLimit">0</Property>
+         <Property Name="ParsedConstraint">lvdataCounter = Len(outRm_dup.Encrypt_Column)</Property>
+         <Property Name="SourceColumns">outRm_dup.Encrypt_Column</Property>
+         <Collection Name="Columns" Type="OutputColumn">
+            <SubRecord>
+               <Property Name="Name">Encrypt_Column</Property>
+               <Property Name="SqlType">12</Property>
+               <Property Name="Precision">0</Property>
+               <Property Name="Scale">0</Property>
+               <Property Name="Nullable">1</Property>
+               <Property Name="KeyPosition">0</Property>
+               <Property Name="DisplaySize">0</Property>
+               <Property Name="Derivation">outRm_dup.Encrypt_Column</Property>
+               <Property Name="Group">0</Property>
+               <Property Name="ParsedDerivation">outRm_dup.Encrypt_Column</Property>
+               <Property Name="SourceColumn">outRm_dup.Encrypt_Column</Property>
+               <Property Name="SortKey">0</Property>
+               <Property Name="SortType">0</Property>
+               <Property Name="AllowCRLF">0</Property>
+               <Property Name="LevelNo">0</Property>
+               <Property Name="Occurs">0</Property>
+               <Property Name="PadNulls">0</Property>
+               <Property Name="SignOption">0</Property>
+               <Property Name="SortingOrder">0</Property>
+               <Property Name="ArrayHandling">0</Property>
+               <Property Name="SyncIndicator">0</Property>
+               <Property Name="PadChar"/>
+               <Property Name="ExtendedPrecision">0</Property>
+               <Property Name="TaggedSubrec">0</Property>
+               <Property Name="OccursVarying">0</Property>
+               <Property Name="PKeyIsCaseless">0</Property>
+               <Property Name="SCDPurpose">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">Binary_String</Property>
+               <Property Name="SqlType">-9</Property>
+               <Property Name="Precision">0</Property>
+               <Property Name="Scale">0</Property>
+               <Property Name="Nullable">1</Property>
+               <Property Name="KeyPosition">0</Property>
+               <Property Name="DisplaySize">0</Property>
+               <Property Name="Derivation">lvbinaryString</Property>
+               <Property Name="Group">0</Property>
+               <Property Name="ParsedDerivation">lvbinaryString</Property>
+               <Property Name="SortKey">0</Property>
+               <Property Name="SortType">0</Property>
+               <Property Name="AllowCRLF">0</Property>
+               <Property Name="LevelNo">0</Property>
+               <Property Name="Occurs">0</Property>
+               <Property Name="PadNulls">0</Property>
+               <Property Name="SignOption">0</Property>
+               <Property Name="SortingOrder">0</Property>
+               <Property Name="StageVars">\(1B)lvbinaryString</Property>
+               <Property Name="ArrayHandling">0</Property>
+               <Property Name="SyncIndicator">0</Property>
+               <Property Name="PadChar"/>
+               <Property Name="ExtendedPrecision">0</Property>
+               <Property Name="TaggedSubrec">0</Property>
+               <Property Name="OccursVarying">0</Property>
+               <Property Name="PKeyIsCaseless">0</Property>
+               <Property Name="SCDPurpose">0</Property>
+            </SubRecord>
+         </Collection>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">DiskWriteInc</Property>
+               <Property Name="Value">1048576</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">BufFreeRun</Property>
+               <Property Name="Value">50</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">MaxMemBufSize</Property>
+               <Property Name="Value">3145728</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">QueueUpperSize</Property>
+               <Property Name="Value">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">Schema</Property>
+               <Property Name="Value" PreFormatted="1">record
+(
+  Encrypt_Column:nullable string[];
+  Binary_String:nullable ustring[];
+)</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="StageVars">\(1B)lvdataCounter</Property>
+         <Property Name="LeftTextPos">501</Property>
+         <Property Name="TopTextPos">197</Property>
+         <Property Name="LinkMinimised">0</Property>
+      </Record>
+      <Record Identifier="V12S0P4" Type="TrxInput" Readonly="0">
+         <Property Name="Name">outRm_dup</Property>
+         <Property Name="Partner">V9S42|V9S42P2</Property>
+         <Property Name="LinkType">1</Property>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">RTColumnProp</Property>
+               <Property Name="Value">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">Schema</Property>
+               <Property Name="Value" PreFormatted="1">record
+(
+  Encrypt_Column:nullable string[];
+)</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="MultiRow">0</Property>
+         <Property Name="LinkMinimised">0</Property>
+      </Record>
+      <Record Identifier="V12S2" Type="TransformerStage" Readonly="0">
+         <Property Name="Name">trn2</Property>
+         <Property Name="NextID">4</Property>
+         <Property Name="InputPins">V12S2P1</Property>
+         <Property Name="OutputPins">V12S2P2</Property>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">TrxGenCode</Property>
+               <Property Name="Value" PreFormatted="1">//
+// Generated file to implement the V12S2_ctrEncryptKey_trn2 transform operator.
+//
+
+// define our input/output link names
+inputname 0 frmtrn1;
+outputname 0 out_cont;
+
+initialize {
+	// define our control variables
+	int8 RowRejected0;
+	int8 NullSetVar0;
+	uint64 Iteration0;
+
+
+	// get any loop warning threshold
+	int64 LoopThreshold0;
+	string LoopThresholdEnv0;
+	string LoopThresholdName0;
+	LoopThresholdName0 = &quot;APT_TRANSFORM_LOOP_WARNING_THRESHOLD&quot;;
+	LoopThresholdEnv0 = get_environment(LoopThresholdName0);
+	if ((LoopThresholdEnv0 == &quot;&quot;) || (LoopThresholdEnv0 == &quot;-1&quot;)) {
+		LoopThreshold0 = 10000;
+	} else {
+		LoopThreshold0 = LoopThresholdEnv0;
+	}
+
+	// declare our intermediate variables for this section
+	string InterVar0_0;
+	string InterVar0_8;
+
+	// initialise constant values which require conversion
+	InterVar0_0 = &quot;0&quot;;
+}
+
+mainloop {
+	Iteration0 = 1;
+
+	// declare our intermediate variables for this section
+	dfloat InterVar0_1;
+	dfloat InterVar0_2;
+	dfloat InterVar0_3;
+	dfloat InterVar0_4;
+	dfloat InterVar0_5;
+	string InterVar0_6;
+	int32 InterVar0_7;
+
+	// Loop variable declaration and initialisation
+	int32 LoopVar0_lvsplitCounter;
+	LoopVar0_lvsplitCounter = -4;
+	string LoopVar0_lvsplitBinary;
+	LoopVar0_lvsplitBinary = &quot;&quot;;
+	string LoopVar0_lvtmpBinary;
+	LoopVar0_lvtmpBinary = &quot;&quot;;
+	int32 LoopVar0_lvsplitDecimal;
+	LoopVar0_lvsplitDecimal = 0;
+	string LoopVar0_lvencData;
+	LoopVar0_lvencData = &quot;&quot;;
+
+	InterVar0_1 = LoopVar0_lvsplitCounter + 5;
+
+	while ((InterVar0_1 &lt;= u_string_length(frmtrn1.Binary_String))) {
+
+		// evaluate the loop variables
+		LoopVar0_lvsplitCounter = (LoopVar0_lvsplitCounter + 5);
+		LoopVar0_lvsplitBinary = u_substring_1(frmtrn1.Binary_String , LoopVar0_lvsplitCounter , 5);
+		LoopVar0_lvtmpBinary = right_substring((string_of_substring(InterVar0_0 , 5) + LoopVar0_lvsplitBinary) , 5);
+		InterVar0_1 = substring_1(LoopVar0_lvtmpBinary , 1 , 1);
+		InterVar0_2 = substring_1(LoopVar0_lvtmpBinary , 2 , 1);
+		InterVar0_3 = substring_1(LoopVar0_lvtmpBinary , 3 , 1);
+		InterVar0_4 = substring_1(LoopVar0_lvtmpBinary , 4 , 1);
+		InterVar0_5 = substring_1(LoopVar0_lvtmpBinary , 5 , 1);
+		LoopVar0_lvsplitDecimal = ((((((InterVar0_1 * 16) + (InterVar0_2 * 8)) + (InterVar0_3 * 4)) + (InterVar0_4 * 2)) + (InterVar0_5 * 1)) + 65);
+		if ((LoopVar0_lvsplitDecimal &gt; 90)) {
+			InterVar0_7 = LoopVar0_lvsplitDecimal - 43;
+			InterVar0_6 = char_from_num(InterVar0_7);
+		} else {
+			InterVar0_6 = char_from_num(LoopVar0_lvsplitDecimal);
+		}
+		LoopVar0_lvencData = (LoopVar0_lvencData + InterVar0_6);
+
+
+		// initialise the rejected row variable
+		RowRejected0 = 1;
+
+		// evaluate constraint and columns for link: out_cont
+		InterVar0_1 = LoopVar0_lvsplitCounter + 5;
+		if ((InterVar0_1 &gt;= u_string_length(frmtrn1.Binary_String)))
+		{
+			out_cont.Encrypt_Column = frmtrn1.Encrypt_Column;
+			out_cont.Encrypted_Column = LoopVar0_lvencData;
+			writerecord 0;
+			RowRejected0 = 0;
+		}
+
+		// Check for hitting the warning threshold
+		if (LoopThreshold0 &gt; 0) {
+			if ((Iteration0 % LoopThreshold0) == 0) {
+				InterVar0_8 = Iteration0;
+				print_warning(&quot;The warning threshold for the number of output row iterations processed per single input row has been reached. Number of output row iterations: &quot; + InterVar0_8 + &quot;. This is just a warning and the job will continue.&quot;);
+			}
+		}
+		Iteration0 = Iteration0 + 1;
+		// now do any work to re-evaluate the while condition
+	InterVar0_1 = LoopVar0_lvsplitCounter + 5;
+
+	}
+}
+
+finish {
+}
+</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">TrxGenCache</Property>
+               <Property Name="Value">1</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">TrxClassName</Property>
+               <Property Name="Value">V12S2_ctrEncryptKey_trn2</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="ValidationStatus">0</Property>
+         <Property Name="StageType">CTransformerStage</Property>
+         <Property Name="BlockSize">0</Property>
+         <Property Name="SKKeySourceType">file</Property>
+         <Collection Name="LoopCondition" Type="StageVar">
+            <SubRecord>
+               <Property Name="Name">$LoopCondition</Property>
+               <Property Name="Expression">lvsplitCounter + 5 &lt;= Len(frmtrn1.Binary_String)</Property>
+               <Property Name="SqlType">3</Property>
+               <Property Name="ParsedExpression">lvsplitCounter + 5 &lt;= Len(frmtrn1.Binary_String)</Property>
+               <Property Name="SourceColumn">frmtrn1.Binary_String</Property>
+               <Property Name="StageVars">\(1B)lvsplitCounter</Property>
+               <Property Name="Precision">18</Property>
+               <Property Name="ColScale">4</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+         </Collection>
+         <Collection Name="LoopVars" Type="StageVar">
+            <SubRecord>
+               <Property Name="Name">lvsplitCounter</Property>
+               <Property Name="Expression">lvsplitCounter + 5</Property>
+               <Property Name="InitialValue">-4</Property>
+               <Property Name="SqlType">4</Property>
+               <Property Name="ParsedExpression">lvsplitCounter + 5</Property>
+               <Property Name="StageVars">\(1B)lvsplitCounter</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvsplitBinary</Property>
+               <Property Name="Expression">frmtrn1.Binary_String [lvsplitCounter,5]</Property>
+               <Property Name="SqlType">12</Property>
+               <Property Name="ParsedExpression">frmtrn1.Binary_String[lvsplitCounter, 5]</Property>
+               <Property Name="SourceColumn">frmtrn1.Binary_String</Property>
+               <Property Name="StageVars">\(1B)lvsplitCounter</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvtmpBinary</Property>
+               <Property Name="Expression">RIGHT(STR(&apos;0&apos;,5) : lvsplitBinary, 5)</Property>
+               <Property Name="SqlType">12</Property>
+               <Property Name="ParsedExpression">RIGHT(STR(&apos;0&apos;, 5) : lvsplitBinary, 5)</Property>
+               <Property Name="StageVars">\(1B)lvsplitBinary</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvsplitDecimal</Property>
+               <Property Name="Expression">(lvtmpBinary[1,1] * 16) + (lvtmpBinary[2,1] * 8) + (lvtmpBinary[3,1] * 4) + (lvtmpBinary[4,1] * 2) + (lvtmpBinary[5,1] * 1) + 65</Property>
+               <Property Name="SqlType">4</Property>
+               <Property Name="ParsedExpression">(lvtmpBinary[1, 1] * 16) + (lvtmpBinary[2, 1] * 8) + (lvtmpBinary[3, 1] * 4) + (lvtmpBinary[4, 1] * 2) + (lvtmpBinary[5, 1] * 1) + 65</Property>
+               <Property Name="StageVars">\(1B)lvtmpBinary</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">lvencData</Property>
+               <Property Name="Expression">lvencData : (If lvsplitDecimal &gt; 90 Then Char(lvsplitDecimal - 43) Else Char(lvsplitDecimal))</Property>
+               <Property Name="SqlType">12</Property>
+               <Property Name="ParsedExpression">lvencData : ( If lvsplitDecimal &gt; 90 Then Char(lvsplitDecimal - 43) Else Char(lvsplitDecimal))</Property>
+               <Property Name="StageVars">\(1B)lvencData;lvsplitDecimal</Property>
+               <Property Name="Precision">255</Property>
+               <Property Name="ColScale">0</Property>
+               <Property Name="ExtendedPrecision">0</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="StageVarsMinimised">0</Property>
+         <Property Name="LoopVarsMaximised">1</Property>
+         <Property Name="MaxLoopIterations">0</Property>
+      </Record>
+      <Record Identifier="V12S2P1" Type="TrxInput" Readonly="0">
+         <Property Name="Name">frmtrn1</Property>
+         <Property Name="Partner">V12S0|V12S0P2</Property>
+         <Property Name="LinkType">1</Property>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">RTColumnProp</Property>
+               <Property Name="Value">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">Schema</Property>
+               <Property Name="Value" PreFormatted="1">record
+(
+  Encrypt_Column:nullable string[];
+  Binary_String:nullable ustring[];
+)</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="MultiRow">0</Property>
+         <Property Name="LinkMinimised">0</Property>
+      </Record>
+      <Record Identifier="V12S2P2" Type="TrxOutput" Readonly="0">
+         <Property Name="Name">out_cont</Property>
+         <Property Name="Partner">V9|V9P12</Property>
+         <Property Name="Constraint">lvsplitCounter + 5 &gt;= Len(frmtrn1.Binary_String)</Property>
+         <Property Name="Reject">0</Property>
+         <Property Name="ErrorPin">0</Property>
+         <Property Name="RowLimit">0</Property>
+         <Property Name="ParsedConstraint">lvsplitCounter + 5 &gt;= Len(frmtrn1.Binary_String)</Property>
+         <Property Name="SourceColumns">frmtrn1.Binary_String</Property>
+         <Collection Name="Columns" Type="OutputColumn">
+            <SubRecord>
+               <Property Name="Name">Encrypt_Column</Property>
+               <Property Name="SqlType">1</Property>
+               <Property Name="Precision">20</Property>
+               <Property Name="Scale">0</Property>
+               <Property Name="Nullable">1</Property>
+               <Property Name="KeyPosition">0</Property>
+               <Property Name="DisplaySize">0</Property>
+               <Property Name="Derivation">frmtrn1.Encrypt_Column</Property>
+               <Property Name="Group">0</Property>
+               <Property Name="ParsedDerivation">frmtrn1.Encrypt_Column</Property>
+               <Property Name="SourceColumn">frmtrn1.Encrypt_Column</Property>
+               <Property Name="SortKey">0</Property>
+               <Property Name="SortType">0</Property>
+               <Property Name="AllowCRLF">0</Property>
+               <Property Name="LevelNo">0</Property>
+               <Property Name="Occurs">0</Property>
+               <Property Name="PadNulls">0</Property>
+               <Property Name="SignOption">0</Property>
+               <Property Name="SortingOrder">0</Property>
+               <Property Name="ArrayHandling">0</Property>
+               <Property Name="SyncIndicator">0</Property>
+               <Property Name="PadChar"/>
+               <Property Name="ExtendedPrecision">0</Property>
+               <Property Name="TaggedSubrec">0</Property>
+               <Property Name="OccursVarying">0</Property>
+               <Property Name="PKeyIsCaseless">0</Property>
+               <Property Name="SCDPurpose">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">Encrypted_Column</Property>
+               <Property Name="SqlType">1</Property>
+               <Property Name="Precision">20</Property>
+               <Property Name="Scale">0</Property>
+               <Property Name="Nullable">1</Property>
+               <Property Name="KeyPosition">0</Property>
+               <Property Name="DisplaySize">20</Property>
+               <Property Name="Derivation">lvencData</Property>
+               <Property Name="Group">0</Property>
+               <Property Name="ParsedDerivation">lvencData</Property>
+               <Property Name="SortKey">0</Property>
+               <Property Name="SortType">0</Property>
+               <Property Name="AllowCRLF">0</Property>
+               <Property Name="LevelNo">0</Property>
+               <Property Name="Occurs">0</Property>
+               <Property Name="PadNulls">0</Property>
+               <Property Name="SignOption">0</Property>
+               <Property Name="SortingOrder">0</Property>
+               <Property Name="StageVars">\(1B)lvencData</Property>
+               <Property Name="ArrayHandling">0</Property>
+               <Property Name="SyncIndicator">0</Property>
+               <Property Name="PadChar"/>
+               <Property Name="ExtendedPrecision">0</Property>
+               <Property Name="TaggedSubrec">0</Property>
+               <Property Name="OccursVarying">0</Property>
+               <Property Name="PKeyIsCaseless">0</Property>
+               <Property Name="SCDPurpose">0</Property>
+            </SubRecord>
+         </Collection>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">DiskWriteInc</Property>
+               <Property Name="Value">1048576</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">BufFreeRun</Property>
+               <Property Name="Value">50</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">MaxMemBufSize</Property>
+               <Property Name="Value">3145728</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">QueueUpperSize</Property>
+               <Property Name="Value">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">Schema</Property>
+               <Property Name="Value" PreFormatted="1">record
+(
+  Encrypt_Column:nullable string[20];
+  Encrypted_Column:nullable string[20];
+)</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">SortOrderPreserved</Property>
+               <Property Name="Value">1</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="StageVars">\(1B)lvsplitCounter</Property>
+         <Property Name="LeftTextPos">628</Property>
+         <Property Name="TopTextPos">192</Property>
+         <Property Name="LinkMinimised">0</Property>
+      </Record>
+      <Record Identifier="V9" Type="ContainerView" Readonly="0">
+         <Property Name="Name">ctrEncryptKey</Property>
+         <Property Name="NextID">13</Property>
+         <Property Name="InputPins">V9P12</Property>
+         <Property Name="OutputPins">V9P2</Property>
+         <Property Name="IsTopLevel">0</Property>
+         <Property Name="StageList">V9|V9|V12S0|V12S2|V9S42|V9A44</Property>
+         <Property Name="StageXPos">96|768|408|576|240|116</Property>
+         <Property Name="StageYPos">168|168|168|168|168|278</Property>
+         <Property Name="StageTypes">ID_PALETTEINPUT|ID_PALETTEOUTPUT|CTransformerStage|CTransformerStage|CCustomStage|ID_PALETTEJOBANNOTATION</Property>
+         <Property Name="NextStageID">45</Property>
+         <Property Name="SnapToGrid">1</Property>
+         <Property Name="GridLines">0</Property>
+         <Property Name="ZoomValue">100</Property>
+         <Property Name="StageXSize">36|36|48|48|48|703</Property>
+         <Property Name="StageYSize">48|48|48|48|48|295</Property>
+         <Property Name="ContainerViewSizing">0066 0039 0769 0640 0000 0001 0000 0000</Property>
+         <Property Name="StageNames">ID_PALETTEINPUT|ID_PALETTEOUTPUT|trn1|trn2|Rm_dup|\(20)</Property>
+         <Property Name="StageTypeIDs">ID_PALETTEINPUT|ID_PALETTEOUTPUT|CTransformerStage|CTransformerStage|PxRemDup|\(20)</Property>
+         <Property Name="LinkNames">inp_cont| |frmtrn1|out_cont|outRm_dup|\(20)</Property>
+         <Property Name="LinkHasMetaDatas">True| |True|True|True|\(20)</Property>
+         <Property Name="LinkTypes">1| |1|1|1|\(20)</Property>
+         <Property Name="LinkNamePositionXs">147| |501|628|296|\(20)</Property>
+         <Property Name="LinkNamePositionYs">201| |197|192|193|\(20)</Property>
+         <Property Name="TargetStageIDs">V9S42| |V12S2|V9|V12S0|\(20)</Property>
+         <Property Name="SourceStageEffectiveExecutionModes">2| |2|2|2|\(20)</Property>
+         <Property Name="SourceStageRuntimeExecutionModes">2| |2|2|2|\(20)</Property>
+         <Property Name="TargetStageEffectiveExecutionModes">2| |2|2|2|\(20)</Property>
+         <Property Name="TargetStageRuntimeExecutionModes">2| |2|2|2|\(20)</Property>
+         <Property Name="LinkIsSingleOperatorLookup">False| |False|False|False|\(20)</Property>
+         <Property Name="LinkIsSortSequential">False| |False|False|False|\(20)</Property>
+         <Property Name="LinkSortMode">0| |0|0|0|\(20)</Property>
+         <Property Name="LinkPartColMode">1| |1|1|1|\(20)</Property>
+         <Property Name="LinkSourcePinIDs">V9P2| |V12S0P2|V12S2P2|V9S42P2|\(20)</Property>
+      </Record>
+      <Record Identifier="V9A44" Type="Annotation" Readonly="0">
+         <Property Name="Name">V9A44</Property>
+         <Property Name="NextID">0</Property>
+         <Property Name="AnnotationType">1</Property>
+         <Property Name="TextFont">MS Shell Dlg\10\0\0\0\400\0</Property>
+         <Property Name="TextHorizontalJustification">1</Property>
+         <Property Name="TextVerticalJustification">1</Property>
+         <Property Name="TextColor">0</Property>
+         <Property Name="BackgroundColor">12713983</Property>
+         <Property Name="BackgroundTransparent">0</Property>
+         <Property Name="BorderVisible">1</Property>
+      </Record>
+      <Record Identifier="V9P12" Type="StdPin" Readonly="0">
+         <Property Name="Name">out_cont</Property>
+         <Property Name="Partner">V12S2|V12S2P2</Property>
+         <Property Name="LinkType">1</Property>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">RTColumnProp</Property>
+               <Property Name="Value">0</Property>
+            </SubRecord>
+         </Collection>
+      </Record>
+      <Record Identifier="V9P2" Type="StdOutput" Readonly="0">
+         <Property Name="Name">inp_cont</Property>
+         <Property Name="Partner">V9S42|V9S42P1</Property>
+         <Collection Name="Columns" Type="OutputColumn">
+            <SubRecord>
+               <Property Name="Name">Encrypt_Column</Property>
+               <Property Name="SqlType">1</Property>
+               <Property Name="Precision">20</Property>
+               <Property Name="Scale">0</Property>
+               <Property Name="Nullable">1</Property>
+               <Property Name="KeyPosition">0</Property>
+               <Property Name="DisplaySize">0</Property>
+               <Property Name="Group">0</Property>
+               <Property Name="SortKey">0</Property>
+               <Property Name="SortType">0</Property>
+               <Property Name="AllowCRLF">0</Property>
+               <Property Name="LevelNo">0</Property>
+               <Property Name="Occurs">0</Property>
+               <Property Name="PadNulls">0</Property>
+               <Property Name="SignOption">0</Property>
+               <Property Name="SortingOrder">0</Property>
+               <Property Name="ArrayHandling">0</Property>
+               <Property Name="SyncIndicator">0</Property>
+               <Property Name="PadChar"/>
+               <Property Name="ExtendedPrecision">0</Property>
+               <Property Name="TaggedSubrec">0</Property>
+               <Property Name="OccursVarying">0</Property>
+               <Property Name="PKeyIsCaseless">0</Property>
+               <Property Name="SCDPurpose">0</Property>
+            </SubRecord>
+         </Collection>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">DiskWriteInc</Property>
+               <Property Name="Value">1048576</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">BufFreeRun</Property>
+               <Property Name="Value">50</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">MaxMemBufSize</Property>
+               <Property Name="Value">3145728</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">QueueUpperSize</Property>
+               <Property Name="Value">0</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="LeftTextPos">147</Property>
+         <Property Name="TopTextPos">201</Property>
+      </Record>
+      <Record Identifier="V9S42" Type="CustomStage" Readonly="0">
+         <Property Name="Name">Rm_dup</Property>
+         <Property Name="NextID">3</Property>
+         <Property Name="InputPins">V9S42P1</Property>
+         <Property Name="OutputPins">V9S42P2</Property>
+         <Property Name="StageType">PxRemDup</Property>
+         <Property Name="AllowColumnMapping">0</Property>
+         <Collection Name="Properties" Type="CustomProperty">
+            <SubRecord>
+               <Property Name="Name">keep</Property>
+               <Property Name="Value">first</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Name">key</Property>
+               <Property Name="Value">\(2)\(2)0\(1)\(3)key\(2)Encrypt_Column\(2)0</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="NextRecordID">0</Property>
+      </Record>
+      <Record Identifier="V9S42P1" Type="CustomInput" Readonly="0">
+         <Property Name="Name">inp_cont</Property>
+         <Property Name="Partner">V9|V9P2</Property>
+         <Property Name="LinkType">1</Property>
+         <Property Name="ConditionNotMet">fail</Property>
+         <Property Name="LookupFail">fail</Property>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">RTColumnProp</Property>
+               <Property Name="Value">0</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">SortAdv</Property>
+               <Property Name="Value">-nonStable</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">SeqSort</Property>
+               <Property Name="Value">0</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="TransactionSize">0</Property>
+         <Property Name="TXNBehaviour">0</Property>
+         <Property Name="EnableTxGroup">0</Property>
+         <Property Name="LinkMinimised">0</Property>
+      </Record>
+      <Record Identifier="V9S42P2" Type="CustomOutput" Readonly="0">
+         <Property Name="Name">outRm_dup</Property>
+         <Property Name="Partner">V12S0|V12S0P4</Property>
+         <Collection Name="Columns" Type="OutputColumn">
+            <SubRecord>
+               <Property Name="Name">Encrypt_Column</Property>
+               <Property Name="SqlType">12</Property>
+               <Property Name="Precision">0</Property>
+               <Property Name="Scale">0</Property>
+               <Property Name="Nullable">1</Property>
+               <Property Name="KeyPosition">0</Property>
+               <Property Name="DisplaySize">0</Property>
+               <Property Name="Derivation">inp_cont.Encrypt_Column</Property>
+               <Property Name="Group">0</Property>
+               <Property Name="ParsedDerivation">inp_cont.Encrypt_Column</Property>
+               <Property Name="SourceColumn">inp_cont.Encrypt_Column</Property>
+               <Property Name="SortKey">0</Property>
+               <Property Name="SortType">0</Property>
+               <Property Name="AllowCRLF">0</Property>
+               <Property Name="LevelNo">0</Property>
+               <Property Name="Occurs">0</Property>
+               <Property Name="PadNulls">0</Property>
+               <Property Name="SignOption">0</Property>
+               <Property Name="SortingOrder">0</Property>
+               <Property Name="ArrayHandling">0</Property>
+               <Property Name="SyncIndicator">0</Property>
+               <Property Name="PadChar"/>
+               <Property Name="ExtendedPrecision">0</Property>
+               <Property Name="TaggedSubrec">0</Property>
+               <Property Name="OccursVarying">0</Property>
+               <Property Name="PKeyIsCaseless">0</Property>
+               <Property Name="SCDPurpose">0</Property>
+            </SubRecord>
+         </Collection>
+         <Collection Name="MetaBag" Type="MetaProperty">
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">DiskWriteInc</Property>
+               <Property Name="Value">1048576</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">BufFreeRun</Property>
+               <Property Name="Value">50</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">MaxMemBufSize</Property>
+               <Property Name="Value">3145728</Property>
+            </SubRecord>
+            <SubRecord>
+               <Property Name="Owner">APT</Property>
+               <Property Name="Name">QueueUpperSize</Property>
+               <Property Name="Value">0</Property>
+            </SubRecord>
+         </Collection>
+         <Property Name="LeftTextPos">296</Property>
+         <Property Name="TopTextPos">193</Property>
+         <Property Name="LinkMinimised">0</Property>
+      </Record>
+   </SharedContainer>
+</DSExport>
