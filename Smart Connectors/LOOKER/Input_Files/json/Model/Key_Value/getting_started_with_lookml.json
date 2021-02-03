@@ -1,0 +1,16 @@
+Key!@#$%^&Value
+orders::Join_Condition!@#$%^&order_items.order_id=orders.id
+orders::Join_Type!@#$%^&left_outer
+orders::Relationship!@#$%^&many_to_one
+users::Join_Condition!@#$%^&order_items.user_id=users.id
+users::Join_Type!@#$%^&left_outer
+users::Relationship!@#$%^&many_to_one
+inventory_items::Join_Condition!@#$%^&order_items.inventory_item_id=inventory_items.id
+inventory_items::Join_Type!@#$%^&left_outer
+inventory_items::Relationship!@#$%^&many_to_one
+products::Join_Condition!@#$%^&inventory_items.product_id=products.id
+products::Join_Type!@#$%^&left_outer
+products::Relationship!@#$%^&many_to_one
+distribution_centers::Join_Condition!@#$%^&products.distribution_center_id=distribution_centers.id
+distribution_centers::Join_Type!@#$%^&left_outer
+distribution_centers::Relationship!@#$%^&many_to_one

@@ -1,0 +1,7 @@
+Key:Value
+orders:public.orders
+users:public.users
+distribution_centers:public.distribution_centers
+inventory_items:public.inventory_items
+products:public.products
+events:public.events
