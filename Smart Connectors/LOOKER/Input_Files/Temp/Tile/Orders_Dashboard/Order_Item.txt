@@ -1,9 +1,0 @@
-- title: Order_Item
-name: Order_Item
-model: e_commerce
-explore: order_items
-type: looker_grid
-fields: [order_items.id, order_items.status, order_items.count, order_items.total_profit]
-filters @ order_items.status: "%Complete%"
-sorts: [order_items.count desc]
-

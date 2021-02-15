@@ -1,9 +1,0 @@
-- title: Orders
-name: Orders
-model: e_commerce
-explore: orders
-type: looker_column
-fields: [orders.status, orders.id, orders.count]
-filters @ orders.is_complete: 'Yes'
-sorts: [orders.count desc]
-
